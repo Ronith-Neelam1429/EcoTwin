@@ -3,7 +3,7 @@ import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
 import { Box, LocateFixed, MapPin, PersonStanding, X } from "lucide-react";
 import type { TwinLocation } from "../lib/ecotwin/types";
 
-const BELLEVUE_COLLEGE = { lat: 47.5847, lng: -122.1497 };
+const SEATTLE = { lat: 47.6062, lng: -122.3321 };
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim();
 let mapsLoaderConfigured = false;
 
@@ -12,6 +12,36 @@ type MapStatus = "loading" | "ready" | "missing-key" | "error";
 type GoogleMapViewProps = {
   onCreateTwin: (location: TwinLocation) => void;
 };
+
+async function getInitialLocation(geocoder: google.maps.Geocoder) {
+  const position = await new Promise<GeolocationPosition | null>((resolve) => {
+    if (!navigator.geolocation) {
+      resolve(null);
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(resolve, () => resolve(null), {
+      enableHighAccuracy: true,
+      timeout: 8000,
+      maximumAge: 300000,
+    });
+  });
+
+  if (!position) return { center: SEATTLE, label: "Seattle" };
+
+  const center = {
+    lat: position.coords.latitude,
+    lng: position.coords.longitude,
+  };
+  try {
+    const response = await geocoder.geocode({ location: center });
+    return {
+      center,
+      label: response.results[0]?.formatted_address ?? "Your location",
+    };
+  } catch {
+    return { center, label: "Your location" };
+  }
+}
 
 function toLiteral(location: google.maps.LatLng | google.maps.LatLngLiteral) {
   if (typeof (location as google.maps.LatLng).lat === "function") {
@@ -25,9 +55,14 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
   const mapElement = useRef<HTMLDivElement>(null);
   const autocompleteMount = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<google.maps.Map | null>(null);
-  const selectedLocation = useRef<google.maps.LatLng | google.maps.LatLngLiteral>(BELLEVUE_COLLEGE);
-  const [status, setStatus] = useState<MapStatus>(GOOGLE_MAPS_API_KEY ? "loading" : "missing-key");
-  const [placeName, setPlaceName] = useState("Bellevue College");
+  const selectedLocation = useRef<
+    google.maps.LatLng | google.maps.LatLngLiteral
+  >(SEATTLE);
+  const [status, setStatus] = useState<MapStatus>(
+    GOOGLE_MAPS_API_KEY ? "loading" : "missing-key",
+  );
+  const [placeName, setPlaceName] = useState("Seattle");
+  const [addressWasTyped, setAddressWasTyped] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const [streetViewActive, setStreetViewActive] = useState(false);
   const [message, setMessage] = useState("");
@@ -47,34 +82,55 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
           importLibrary("places"),
         ]);
 
-        if (cancelled || !mapElement.current || !autocompleteMount.current) return;
+        if (cancelled || !mapElement.current || !autocompleteMount.current)
+          return;
+
+        const geocoder = new google.maps.Geocoder();
+        const initialLocation = await getInitialLocation(geocoder);
+        if (cancelled || !mapElement.current) return;
+        selectedLocation.current = initialLocation.center;
+        setPlaceName(initialLocation.label);
 
         const map = new Map(mapElement.current, {
-          center: BELLEVUE_COLLEGE,
+          center: initialLocation.center,
           zoom: 16,
           mapTypeControl: false,
           streetViewControl: true,
           fullscreenControl: true,
           zoomControl: true,
           gestureHandling: "greedy",
-          styles: [{ featureType: "poi.business", stylers: [{ visibility: "off" }] }],
+          styles: [
+            { featureType: "poi.business", stylers: [{ visibility: "off" }] },
+          ],
         });
         mapInstance.current = map;
 
         const autocomplete = new PlaceAutocompleteElement({
           placeholder: "Search an address or place",
           requestedRegion: "us",
-          locationBias: BELLEVUE_COLLEGE,
+          locationBias: initialLocation.center,
         });
 
         autocomplete.addEventListener("gmp-select", async (event) => {
           try {
             const place = event.placePrediction.toPlace();
-            await place.fetchFields({ fields: ["displayName", "formattedAddress", "location", "viewport"] });
+            await place.fetchFields({
+              fields: [
+                "displayName",
+                "formattedAddress",
+                "location",
+                "viewport",
+              ],
+            });
             if (!place.location || !mapInstance.current) return;
 
             selectedLocation.current = place.location;
-            setPlaceName(place.displayName ?? place.formattedAddress ?? "Selected location");
+            setPlaceName(
+              place.formattedAddress ??
+                place.displayName ??
+                "Selected location",
+            );
+            setAddressWasTyped(true);
             setSearchError(false);
             setMessage("");
             mapInstance.current.getStreetView().setVisible(false);
@@ -100,7 +156,8 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
         });
         panorama.addListener("position_changed", () => {
           const position = panorama.getPosition();
-          if (position && panorama.getVisible()) selectedLocation.current = position;
+          if (position && panorama.getVisible())
+            selectedLocation.current = position;
         });
         setStatus("ready");
       } catch (error) {
@@ -117,10 +174,11 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
   }, []);
 
   function recenterMap() {
-    selectedLocation.current = BELLEVUE_COLLEGE;
-    setPlaceName("Bellevue College");
+    selectedLocation.current = SEATTLE;
+    setPlaceName("Seattle");
+    setAddressWasTyped(false);
     mapInstance.current?.getStreetView().setVisible(false);
-    mapInstance.current?.panTo(BELLEVUE_COLLEGE);
+    mapInstance.current?.panTo(SEATTLE);
     mapInstance.current?.setZoom(16);
   }
 
@@ -136,7 +194,8 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
 
     setMessage("Finding nearby Street View…");
     try {
-      const { StreetViewService, StreetViewPreference } = await importLibrary("streetView");
+      const { StreetViewService, StreetViewPreference } =
+        await importLibrary("streetView");
       const response = await new StreetViewService().getPanorama({
         location: selectedLocation.current,
         radius: 250,
@@ -172,16 +231,25 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
       heading: panorama.getVisible() ? pov.heading : 0,
       pitch: panorama.getVisible() ? pov.pitch : 0,
       radiusMeters: 150,
+      ...(addressWasTyped ? { address: placeName } : {}),
     });
   }
 
   return (
     <section className="map-stage">
-      <div ref={mapElement} className="google-map" aria-label="Google map and Street View location picker" />
+      <div
+        ref={mapElement}
+        className="google-map"
+        aria-label="Google map and Street View location picker"
+      />
 
       <div className={`search-panel ${status === "ready" ? "is-visible" : ""}`}>
         <div ref={autocompleteMount} className="autocomplete-mount" />
-        {searchError && <span className="search-error">Enable Places API for address search.</span>}
+        {searchError && (
+          <span className="search-error">
+            Enable Places API for address search.
+          </span>
+        )}
       </div>
 
       {status !== "ready" && (
@@ -189,16 +257,23 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
           {status === "loading" && <span>Loading Google Maps…</span>}
           {status === "missing-key" && (
             <>
-              <div className="status-icon"><MapPin size={22} /></div>
+              <div className="status-icon">
+                <MapPin size={22} />
+              </div>
               <strong>Google Maps is ready to connect</strong>
-              <span>Add your API key to the local environment file, then restart the app.</span>
+              <span>
+                Add your API key to the local environment file, then restart the
+                app.
+              </span>
               <code>VITE_GOOGLE_MAPS_API_KEY=your_key_here</code>
             </>
           )}
           {status === "error" && (
             <>
               <strong>The map could not load</strong>
-              <span>Check that the key is valid and Maps JavaScript API is enabled.</span>
+              <span>
+                Check that the key is valid and Maps JavaScript API is enabled.
+              </span>
             </>
           )}
         </div>
@@ -206,15 +281,31 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
 
       {status === "ready" && (
         <>
-          <div className="location-pill"><MapPin size={15} />{placeName}</div>
-          <button className="recenter-button" type="button" onClick={recenterMap} aria-label="Recenter map">
+          <div className="location-pill">
+            <MapPin size={15} />
+            {placeName}
+          </div>
+          <button
+            className="recenter-button"
+            type="button"
+            onClick={recenterMap}
+            aria-label="Recenter map"
+          >
             <LocateFixed size={19} />
           </button>
-          <button className={`street-view-button ${streetViewActive ? "is-active" : ""}`} type="button" onClick={toggleStreetView}>
+          <button
+            className={`street-view-button ${streetViewActive ? "is-active" : ""}`}
+            type="button"
+            onClick={toggleStreetView}
+          >
             {streetViewActive ? <X size={18} /> : <PersonStanding size={19} />}
             {streetViewActive ? "Exit Street View" : "Street View"}
           </button>
-          <button className="create-twin-button" type="button" onClick={createDigitalTwin}>
+          <button
+            className="create-twin-button"
+            type="button"
+            onClick={createDigitalTwin}
+          >
             <Box size={18} />
             Create Digital Twin
           </button>

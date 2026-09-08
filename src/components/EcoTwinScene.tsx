@@ -54,7 +54,7 @@ function Building({ feature, cells, mode, onSelect }: {
   }
   return (
     <group>
-      <Footprint polygons={feature.polygons} height={feature.height} color={mode === "surface" ? "#d4c7ad" : colorFor("building", mode)} onClick={click} />
+      <Footprint polygons={feature.polygons} height={feature.height} color={mode === "surface" ? "#c9cdd3" : colorFor("building", mode)} onClick={click} />
       {roofs.filter((r) => r.polygons.length).map(({ cell, polygons }) => (
         <Footprint key={cell.id} polygons={polygons} y={feature.height + 0.035} color={colorFor(cell.surfaceType, mode)} onClick={click} />
       ))}
@@ -85,10 +85,10 @@ export function EcoTwinScene({ cells, viewMode, onCellClick, neighborhood, locat
   return (
     <div className="scene-canvas">
       <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ position: cameraPosition, fov: 48, near: 0.1, far: 300 }}>
-        <color attach="background" args={["#e4ebe5"]} />
+        <color attach="background" args={["#dfe3e8"]} />
         <ambientLight intensity={1.1} />
         <directionalLight position={[-15, 28, 10]} intensity={2.2} />
-        <mesh position={[0, -0.15, 0]}><boxGeometry args={[30.05, 0.25, 30.05]} /><meshStandardMaterial color="#b5bbaf" /></mesh>
+        <mesh position={[0, -0.15, 0]}><boxGeometry args={[30.05, 0.25, 30.05]} /><meshStandardMaterial color="#aeb4bc" /></mesh>
         {viewMode === "surface" && neighborhood.features.filter((f) => f.surface !== "building").map((feature, index) => (
           <Footprint key={feature.id} polygons={feature.polygons} y={0.014 + index * 0.00003} color={SURFACE_COLORS[feature.surface]}
             onClick={(e) => clickCell(e, cellAt(e.point.x, e.point.z))} />
@@ -103,7 +103,7 @@ export function EcoTwinScene({ cells, viewMode, onCellClick, neighborhood, locat
                 <planeGeometry args={[viewMode === "surface" ? 1 : 0.985, viewMode === "surface" ? 1 : 0.985]} />
                 <meshStandardMaterial color={showSurface ? colorFor(cell.surfaceType, viewMode) : SURFACE_COLORS.unknown} />
               </mesh>
-              {selectedCell === cell.id && <mesh position={[x, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.37, 0.42, 4]} /><meshBasicMaterial color="#eead34" /></mesh>}
+              {selectedCell === cell.id && <mesh position={[x, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.37, 0.42, 4]} /><meshBasicMaterial color="#2f6fed" /></mesh>}
               {cell.surfaceType === "tree" && changed && <Tree x={x} z={z} color={colorFor("tree", viewMode)} onClick={(e) => clickCell(e, cell.id)} />}
             </group>
           );
@@ -114,7 +114,7 @@ export function EcoTwinScene({ cells, viewMode, onCellClick, neighborhood, locat
         {neighborhood.trees.filter((t) => cells.find((c) => c.id === cellAt(...t.point))?.surfaceType === "tree").map((tree) => (
           <Tree key={tree.id} x={tree.point[0]} z={tree.point[1]} color={colorFor("tree", viewMode)} onClick={(e) => clickCell(e, cellAt(...tree.point))} />
         ))}
-        <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.19, 0.27, 32]} /><meshBasicMaterial color="#e39928" /></mesh>
+        <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.19, 0.27, 32]} /><meshBasicMaterial color="#2f6fed" /></mesh>
         <Html position={[0, 0.4, -15.8]} center><span className="north-label">↑ N</span></Html>
         <OrbitControls makeDefault enableDamping minDistance={5} maxDistance={75} maxPolarAngle={Math.PI / 2.1} />
       </Canvas>

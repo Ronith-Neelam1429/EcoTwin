@@ -38,6 +38,7 @@ export type TwinLocation = {
   heading: number;
   pitch: number;
   radiusMeters: 150;
+  address?: string;
 };
 
 export type EcoMetrics = {
