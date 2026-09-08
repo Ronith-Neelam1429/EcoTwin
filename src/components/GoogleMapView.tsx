@@ -77,6 +77,7 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
             setPlaceName(place.displayName ?? place.formattedAddress ?? "Selected location");
             setSearchError(false);
             setMessage("");
+            mapInstance.current.getStreetView().setVisible(false);
 
             if (place.viewport) mapInstance.current.fitBounds(place.viewport);
             else {
@@ -99,7 +100,7 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
         });
         panorama.addListener("position_changed", () => {
           const position = panorama.getPosition();
-          if (position) selectedLocation.current = position;
+          if (position && panorama.getVisible()) selectedLocation.current = position;
         });
         setStatus("ready");
       } catch (error) {
@@ -116,6 +117,9 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
   }, []);
 
   function recenterMap() {
+    selectedLocation.current = BELLEVUE_COLLEGE;
+    setPlaceName("Bellevue College");
+    mapInstance.current?.getStreetView().setVisible(false);
     mapInstance.current?.panTo(BELLEVUE_COLLEGE);
     mapInstance.current?.setZoom(16);
   }
@@ -155,7 +159,9 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
     const map = mapInstance.current;
     if (!map) return;
     const panorama = map.getStreetView();
-    const rawPosition = panorama.getPosition() ?? selectedLocation.current ?? map.getCenter();
+    const rawPosition = panorama.getVisible()
+      ? panorama.getPosition()
+      : selectedLocation.current;
     if (!rawPosition) return;
 
     const position = toLiteral(rawPosition);

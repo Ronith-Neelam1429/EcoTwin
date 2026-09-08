@@ -499,6 +499,27 @@ button { font: inherit; }
 }
 
 .scene-canvas { position: relative; min-width: 0; min-height: 0; cursor: crosshair; }
+.geographic-scene { position: relative; min-width: 0; min-height: 0; }
+.geographic-scene .scene-canvas { width: 100%; height: 100%; }
+.geography-summary { position: absolute; top: 14px; left: 14px; max-width: calc(100% - 28px); display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border: 1px solid #d2ded4; border-radius: 12px; background: #fafcf9ee; color: #63786a; font-size: 0.69rem; pointer-events: none; }
+.geography-summary strong { color: #29593d; font-size: 0.76rem; }
+.model-note { color: #778478; font-size: 0.69rem; line-height: 1.5; margin: 10px 0; }
+.osm-attribution { position: absolute; bottom: 4px; right: 6px; background: #ffffffbf; padding: 2px 5px; font-size: 10px; color: #395e47; }
+.osm-attribution a { color: inherit; }
+.geographic-scene .scene-help { bottom: 28px; font-size: 0.61rem; }
+.scene-key { position: absolute; bottom: 63px; left: 14px; display: flex; align-items: center; gap: 5px; padding: 6px 9px; background: #fafcf9dd; border-radius: 7px; font-size: 0.64rem; color: #48624e; pointer-events: none; }
+.unknown-swatch, .origin-swatch { width: 10px; height: 10px; display: inline-block; background: #d0cec3; border: 1px solid #b9b7aa; }
+.origin-swatch { background: #e39928; border-radius: 50%; border: 0; }
+.scale-heat, .scale-runoff { width: 70px; height: 9px; display: inline-block; background: linear-gradient(90deg, #e4c32a, #e32b2b); }
+.scale-runoff { background: linear-gradient(90deg, #bdd5f3, #133d6b); }
+.north-label { color: #386048; font-size: 12px; font-weight: 800; white-space: nowrap; pointer-events: none; }
+.edit-message { position: absolute; top: 112px; left: 14px; right: 14px; background: #fff8e7; padding: 10px 12px; color: #785c2c; border-radius: 9px; font-size: 0.75rem; }
+.geography-loading { align-self: center; justify-self: center; max-width: 470px; margin: 30px; text-align: center; color: #3f6950; }
+.geography-loading h2 { font-size: 1.3rem; }
+.geography-loading p { line-height: 1.6; color: #6e7e72; }
+.geography-loading small { display: block; margin-top: 20px; color: #7e8b81; }
+.geography-loading button { padding: 11px 20px; border: 0; border-radius: 8px; background: #276246; color: white; cursor: pointer; }
+.loading-track { display: inline-block; width: 30px; height: 30px; border: 3px solid #bad3c0; border-top-color: #276246; border-radius: 50%; animation: twin-spin 0.9s linear infinite; }
 .scene-canvas canvas { display: block; }
 .scene-help {
   position: absolute;

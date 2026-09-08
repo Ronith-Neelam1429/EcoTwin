@@ -4,6 +4,7 @@ export const CELL_PROPERTIES: Record<
   SurfaceType,
   { heatAbsorption: number; infiltration: number; canopy: number }
 > = {
+  unknown: { heatAbsorption: 0.65, infiltration: 0.3, canopy: 0 },
   asphalt: { heatAbsorption: 0.9, infiltration: 0.05, canopy: 0 },
   grass: { heatAbsorption: 0.45, infiltration: 0.55, canopy: 0.1 },
   building: { heatAbsorption: 0.75, infiltration: 0, canopy: 0 },
@@ -14,6 +15,7 @@ export const CELL_PROPERTIES: Record<
 };
 
 export const SURFACE_COLORS: Record<SurfaceType, string> = {
+  unknown: "#d0cec3",
   asphalt: "#65706f",
   grass: "#75aa64",
   building: "#c1b6a4",
@@ -24,6 +26,7 @@ export const SURFACE_COLORS: Record<SurfaceType, string> = {
 };
 
 export const SURFACE_LABELS: Record<SurfaceType, string> = {
+  unknown: "Unmapped ground (assumed properties)",
   asphalt: "Asphalt",
   grass: "Grass",
   building: "Building",

@@ -1,4 +1,5 @@
 export type SurfaceType =
+  | "unknown"
   | "asphalt"
   | "grass"
   | "building"
@@ -28,6 +29,7 @@ export type EcoCell = {
   canopy: number;
   water: number;
   temperature: number;
+  buildingId?: string;
 };
 
 export type TwinLocation = {

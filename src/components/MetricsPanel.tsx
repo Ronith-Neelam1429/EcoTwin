@@ -26,6 +26,7 @@ export function MetricsPanel({ current, baseline }: { current: EcoMetrics; basel
         <div><span className="panel-kicker">Live environment</span><h2>Scenario impact</h2></div>
         <span className="intervention-count">{current.interventions} placed</span>
       </div>
+      <p className="model-note">Illustrative estimates on a 10m grid. Unmapped ground uses assumed properties; these are not measured site conditions. Runoff is in model units.</p>
 
       <div className="metrics-grid">
         {metrics.map(({ label, value, icon: Icon, tone }) => (

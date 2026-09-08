@@ -34,6 +34,14 @@ The map includes address/place autocomplete and interactive Street View. Street 
 
 ## EcoTwin simulation
 
-Navigate to a location on the map or in Street View and select **Create Digital Twin**. The prototype captures the current coordinates and camera direction, then generates a deterministic 30 × 30 editable simulation grid. Tree, rain garden, green roof, and permeable pavement interventions update the heat, runoff, infiltration, and canopy metrics immediately.
+Navigate to a location on the map or in Street View and select **Create Digital Twin**. EcoTwin captures the active location and camera direction, requests nearby OpenStreetMap geometry through OpenFreeMap, and builds a 300m square scene with real building footprints, road paths, and mapped vegetation areas. No extra API key is required for this step.
 
-The terrain is intentionally synthetic for this MVP. Simulation logic lives in `src/lib/ecotwin` so it can later be replaced with real GIS and environmental data without rebuilding the interface.
+Buildings retain their polygon outlines, including courtyards, and are clipped at the scene boundary. The tile provider's render height can include defaults, so it is always labeled estimated. Road widths use mapped width or lanes when available, otherwise defaults. Terrain is currently flat and roofs are simple extrusions. This is a geographic model, not a photorealistic reconstruction or a survey.
+
+The editable simulation uses a 30 × 30 grid with 10m cells. Building intersections reserve cells for rooftop edits; other mapped surfaces are sampled at cell centres. Tree, rain garden, green roof, and permeable pavement interventions update the illustrative environmental metrics. Green roofs require a building; ground tools cannot erase buildings. Restore Cell and Reset all changes return to the imported baseline. Edits survive switching views during the session.
+
+Unmapped ground is visibly neutral. Its simulation assumptions are heat absorption 0.65, infiltration 0.3, and zero canopy; terrain elevation is zero throughout. Heat/runoff values are model estimates, not measured real-world conditions. Missing buildings, ground cover, trees, elevations, and roof shapes are not reconstructed from Google imagery.
+
+Data: [OpenStreetMap contributors, ODbL](https://www.openstreetmap.org/copyright), [OpenMapTiles](https://openmaptiles.org/), and [OpenFreeMap](https://openfreemap.org/). The browser requests the tiles covering the selected neighborhood from OpenFreeMap. Requests are bounded to the local area, deduplicated and cached in memory (plus normal browser HTTP caching), with a timeout, rate-limit cooldown, and explicit retry UI. A service failure does not silently substitute synthetic terrain. Public service availability and local mapping coverage vary; a production rollout should evaluate a dedicated data provider.
+
+Geometry projection, clipping, road widths, grid mapping, and height handling live in `src/lib/ecotwin/geography.ts`. Environmental formulas remain separate in `simulation.ts`. Run `npm test` for spatial and intervention regression checks.
