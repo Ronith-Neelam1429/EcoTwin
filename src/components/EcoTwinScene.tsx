@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Canvas, type ThreeEvent } from "@react-three/fiber";
+import { useImperativeHandle, useMemo, useState, type Ref } from "react";
+import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import polygonClipping, { type MultiPolygon, type Pair } from "polygon-clipping";
@@ -91,8 +91,30 @@ function Tree({ x, z, color, onClick }: { x: number; z: number; color: string; o
   );
 }
 
-export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neighborhood, location, rainfallMm }: {
-  rainfallMm: number; cells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: Neighborhood; location: TwinLocation;
+export type SceneCapture = { capture: () => string };
+function CaptureBridge({ captureRef, viewMode }: { captureRef?: Ref<SceneCapture>; viewMode: ViewMode }) {
+  const { gl, scene, camera } = useThree();
+  useImperativeHandle(captureRef, () => ({ capture() {
+    if (viewMode !== "surface") throw new Error("The surface view is still updating. Please try again.");
+    const hidden: THREE.Object3D[] = [];
+    scene.traverse((object) => { if (object.userData.captureHidden && object.visible) { hidden.push(object); object.visible = false; } });
+    try {
+      gl.render(scene, camera);
+      const output = document.createElement('canvas');
+      const scale = Math.min(1, 1536 / Math.max(gl.domElement.width, gl.domElement.height));
+      output.width = Math.max(1, Math.round(gl.domElement.width * scale));
+      output.height = Math.max(1, Math.round(gl.domElement.height * scale));
+      const context = output.getContext('2d');
+      if (!context) throw new Error('Could not capture the scene. Please retry.');
+      context.drawImage(gl.domElement, 0, 0, output.width, output.height);
+      return output.toDataURL('image/png');
+    } finally { hidden.forEach((object) => { object.visible = true; }); gl.render(scene, camera); }
+  } }), [gl, scene, camera, viewMode]);
+  return null;
+}
+
+export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neighborhood, location, rainfallMm, captureRef }: {
+  captureRef?: Ref<SceneCapture>; rainfallMm: number; cells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: Neighborhood; location: TwinLocation;
 }) {
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const gridSize = neighborhood.gridSize;
@@ -107,6 +129,7 @@ export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neigh
   return (
     <div className="scene-canvas">
       <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ position: cameraPosition, fov: 48, near: 0.1, far: 300 }}>
+        <CaptureBridge captureRef={captureRef} viewMode={viewMode} />
         <color attach="background" args={["#dfe3e8"]} />
         <ambientLight intensity={1.1} />
         <directionalLight position={[-15, 28, 10]} intensity={2.2} />
@@ -125,7 +148,7 @@ export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neigh
                 <planeGeometry args={[viewMode === "surface" ? 1 : 0.985, viewMode === "surface" ? 1 : 0.985]} />
                 <meshStandardMaterial color={showSurface ? colorFor(cell, viewMode, rainfallMm) : SURFACE_COLORS.unknown} />
               </mesh>
-              {selectedCell === cell.id && <mesh position={[x, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.37, 0.42, 4]} /><meshBasicMaterial color="#2f6fed" /></mesh>}
+              {selectedCell === cell.id && <mesh userData={{ captureHidden: true }} position={[x, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.37, 0.42, 4]} /><meshBasicMaterial color="#2f6fed" /></mesh>}
               {cell.surfaceType === "tree" && changed && <Tree x={x} z={z} color={colorFor(cell, viewMode, rainfallMm)} onClick={(e) => clickCell(e, cell.id)} />}
             </group>
           );
@@ -136,7 +159,7 @@ export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neigh
         {neighborhood.trees.filter((t) => cells.find((c) => c.id === cellAt(...t.point, gridSize))?.surfaceType === "tree").map((tree) => (
           <Tree key={tree.id} x={tree.point[0]} z={tree.point[1]} color={colorFor(cells.find((c) => c.id === cellAt(...tree.point, gridSize))!, viewMode, rainfallMm)} onClick={(e) => clickCell(e, cellAt(...tree.point, gridSize))} />
         ))}
-        <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.19, 0.27, 32]} /><meshBasicMaterial color="#2f6fed" /></mesh>
+        <mesh userData={{ captureHidden: true }} position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.19, 0.27, 32]} /><meshBasicMaterial color="#2f6fed" /></mesh>
         <Html position={[0, 0.4, -halfSize - 0.8]} center><span className="north-label">↑ N</span></Html>
         <OrbitControls makeDefault enableDamping minDistance={Math.max(3, gridSize / 6)} maxDistance={gridSize * 2.5} maxPolarAngle={Math.PI / 2.1} />
       </Canvas>

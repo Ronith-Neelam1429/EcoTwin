@@ -26,6 +26,10 @@ export function tilePosition(lng: number, lat: number, zoom: number) {
 
 export function tileTags(layer: string, properties: Record<string, unknown>): Record<string, string> | null {
   const kind = String(properties.class ?? "");
+  const subclass = String(properties.subclass ?? "");
+  if (layer === "poi" && (kind === "tree" || subclass === "tree" || properties.natural === "tree")) {
+    return { natural: "tree" };
+  }
   if (layer === "building") {
     if (properties.hide_3d === true) return null;
     return { building: "yes", render_height: String(properties.render_height ?? 6) };
@@ -35,6 +39,7 @@ export function tileTags(layer: string, properties: Record<string, unknown>): Re
     return { highway: String(properties.subclass ?? kind), width: String(properties.width ?? ""), lanes: String(properties.lanes ?? "") };
   }
   if (layer === "landcover" || layer === "landuse" || layer === "park") {
+    if (kind === "tree" || subclass === "tree") return { natural: "tree" };
     if (["wood", "forest"].includes(kind)) return { natural: "wood" };
     if (["grass", "grassland", "meadow", "garden", "park", "recreation_ground", "village_green"].includes(kind) || layer === "park") return { landuse: "grass" };
     if (kind === "parking") return { amenity: "parking" };
@@ -59,7 +64,7 @@ export async function loadVectorNeighborhood(location: TwinLocation) {
     const url = source.tiles[0].replace("{z}", String(zoom)).replace("{x}", String(tileX)).replace("{y}", String(y));
     if (new URL(url).origin !== "https://tiles.openfreemap.org") throw new Error("Unexpected map source.");
     const tile = new VectorTile(new PbfReader(await (await get(url)).arrayBuffer()));
-    for (const layerName of ["landcover", "landuse", "park", "transportation", "building"]) {
+    for (const layerName of ["landcover", "landuse", "park", "poi", "transportation", "building"]) {
       const layer = tile.layers[layerName];
       if (!layer) continue;
       for (let i = 0; i < layer.length; i++) {

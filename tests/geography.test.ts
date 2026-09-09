@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { buildingHeight, cellAt, clip, contains, neighborhoodQuery, parseMeters, parseNeighborhood, project } from "../src/lib/ecotwin/geography";
 import { applyIntervention } from "../src/lib/ecotwin/applyIntervention";
+import { tileTags } from "../src/lib/ecotwin/vectorSource";
 import { calculateMetrics } from "../src/lib/ecotwin/simulation";
 import type { TwinLocation } from "../src/lib/ecotwin/types";
 
@@ -27,6 +28,11 @@ test("cell lookup follows a resized study-area grid", () => {
   assert.equal(cellAt(0, 0, 16), "8-8");
   assert.equal(cellAt(-7.5, -7.5, 16), "0-0");
   assert.equal(cellAt(7.5, 7.5, 16), "15-15");
+});
+
+test("vector tree points are retained from POI tiles", () => {
+  assert.deepEqual(tileTags("poi", { class: "tree" }), { natural: "tree" });
+  assert.deepEqual(tileTags("poi", { subclass: "tree" }), { natural: "tree" });
 });
 
 test("courtyards remain empty and polygon edges clip to 300 metres", () => {

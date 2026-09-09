@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { flushSync } from "react-dom";
+import { RealisticView } from "./RealisticView";
+import type { SceneCapture } from "./EcoTwinScene";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Compass, MapPin } from "lucide-react";
 import { applyIntervention } from "../lib/ecotwin/applyIntervention";
 import { loadNeighborhood, type Neighborhood } from "../lib/ecotwin/geography";
@@ -82,6 +85,7 @@ function LoadedTwin({
   location: TwinLocation;
   neighborhood: Neighborhood;
 }) {
+  const captureRef = useRef<SceneCapture>(null);
   const baseline = neighborhood.baseline;
   const [cells, setCells] = useState<EcoCell[]>(() =>
     baseline.map((cell) => ({ ...cell })),
@@ -160,7 +164,16 @@ function LoadedTwin({
             <Compass size={14} /> {Math.round(location.heading)}°
           </span>
         </div>
-        <ViewModeToggle value={viewMode} onChange={setViewMode} />
+        <div className="twin-view-actions">
+          <ViewModeToggle value={viewMode} onChange={setViewMode} />
+          <RealisticView revision={cells.map((cell) => cell.surfaceType).join(',')} capture={async () => {
+            flushSync(() => setViewMode("surface"));
+            // The Three scene reconciles in its own React root. Let it commit the surface materials.
+            await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+            if (!captureRef.current) throw new Error("The scene is still loading. Please retry.");
+            return captureRef.current.capture();
+          }} />
+        </div>
       </div>
 
       <div className="twin-layout">
@@ -176,6 +189,7 @@ function LoadedTwin({
         </EcoTwinSidebar>
         <div className="geographic-scene">
           <EcoTwinScene
+            captureRef={captureRef}
             cells={currentRun.cells}
             rainfallMm={inputs.rainfallMm}
             viewMode={viewMode}

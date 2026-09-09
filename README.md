@@ -55,3 +55,13 @@ The engine uses Green–Ampt ground infiltration, finite water storage and roof 
 Local weather improves the inputs but does not measure soil conductivity, roof construction, tree canopy, or drainage. The model currently has no flow routing, building shadows, snow physics, or neighborhood air-temperature prediction. Each edit changes 100 m²; a tree means an established tree plus soil planting area. See [the physics model documentation](docs/physics-model.md) for equations, parameter provenance, validation, and the path to site calibration.
 
 Checks: `npm test`, `npm run lint`, and `npm run build`.
+
+## Realistic concept views
+
+Place your interventions, orbit/zoom to the desired composition, then select **Realistic view → Generate realistic view**. The app captures the surface model (even when Heat or Runoff is selected) and sends the PNG to OpenAI's image editing API. Trees and roof patches in the capture guide the photographic concept. Compare it with the source capture, download it, or generate again after edits. Results remain available while switching views in the current session; a changed design is marked as out of date.
+
+Set `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_IMAGE_ENDPOINT`, and `AZURE_OPENAI_IMAGE_DEPLOYMENT` in `.env`, then restart `npm run dev`. The endpoint uses Azure's Black Forest Labs provider route (`/providers/blackforestlabs/v1/flux-kontext-pro?api-version=preview`) because it supports reference-image editing even when a resource's OpenAI-compatible Images API route is unavailable. Set the deployment to `FLUX.1-Kontext-pro`. The key stays in the server process and must never have a `VITE_` prefix. Generation uses your Azure credits and requires image-model quota. See the [Azure FLUX image-edit documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/how-to/use-foundry-models-flux).
+
+The endpoint is included in both `npm run dev` and `npm run preview`, accepts only local-computer requests, and permits one generation at a time. A static-only deployment cannot generate images. For a public deployment, move the handler behind authenticated server routing with per-user quotas before exposing it. Captures are processed in memory; they are not saved on the server. Cancel stops waiting and aborts the upstream request, but an already-started generation may still incur API charges.
+
+These are AI-generated planning concepts, not actual photographs, verified Street View reconstructions, or precise forecasts. The image model may change details or placement; the editable 3D model and simulation remain the source of truth. Google imagery is not sent to the image service.

@@ -1230,3 +1230,22 @@ a:focus-visible {
 .scenario-error { font-size: 11px; line-height: 1.5; color: #a23c31; }
 .scenario-reset { padding: 8px 0; border: 0; background: none; color: #426b83; font-size: 11px; cursor: pointer; }
 .model-details:first-of-type { margin-top: 18px; }
+
+.twin-view-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.realistic-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: #215b49; color: white; border: 0; border-radius: 8px; padding: 10px 14px; cursor: pointer; font: inherit; font-size: 13px; }
+.realistic-button:hover { background: #174434; }
+.realistic-dialog { width: min(1000px, calc(100vw - 32px)); max-height: 90vh; overflow: auto; border: 1px solid #dce3df; border-radius: 18px; padding: 24px; color: #24312c; background: #fafcfb; box-shadow: 0 24px 90px #10271f40; }
+.realistic-dialog::backdrop { background: #10221dcc; }
+.realistic-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.realistic-heading h2 { margin: 6px 0 0; font-size: 25px; }
+.realistic-heading button, .realistic-actions button:not(.realistic-button), .realistic-actions a { display: inline-flex; align-items: center; gap: 7px; padding: 10px 12px; border: 1px solid #d4ded8; border-radius: 8px; background: white; color: #24312c; cursor: pointer; text-decoration: none; font: inherit; font-size: 13px; }
+.realistic-dialog p { line-height: 1.6; font-size: 14px; }
+.realistic-preview { position: relative; min-height: 260px; border-radius: 12px; overflow: hidden; background: #e7ece9; display: grid; place-items: center; }
+.realistic-preview img { display: block; width: 100%; max-height: 58vh; object-fit: contain; }
+.realistic-empty { display: grid; justify-items: center; gap: 16px; padding: 40px; text-align: center; color: #547365; }
+.realistic-empty span { font-size: 13px; }
+.realistic-progress { position: absolute; inset: 0; display: grid; place-items: center; background: #eff5eee8; padding: 24px; text-align: center; }
+.realistic-actions { display: flex; gap: 10px; flex-wrap: wrap; margin: 18px 0; }
+.realistic-dialog small { display: block; color: #64766c; line-height: 1.5; }
+.realistic-error { color: #a32c32; }
+@media (max-width: 700px) { .realistic-dialog { padding: 16px; } .twin-view-actions { gap: 6px; } }
