@@ -130,7 +130,7 @@ export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neigh
     <div className="scene-canvas">
       <Canvas frameloop="demand" dpr={[1, 1.5]} camera={{ position: cameraPosition, fov: 48, near: 0.1, far: 300 }}>
         <CaptureBridge captureRef={captureRef} viewMode={viewMode} />
-        <color attach="background" args={["#dfe3e8"]} />
+        <color attach="background" args={["#c9d1d7"]} />
         <ambientLight intensity={1.1} />
         <directionalLight position={[-15, 28, 10]} intensity={2.2} />
         <mesh position={[0, -0.15, 0]}><boxGeometry args={[gridSize + 0.05, 0.25, gridSize + 0.05]} /><meshStandardMaterial color="#aeb4bc" /></mesh>

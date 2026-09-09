@@ -65,11 +65,10 @@ export function MetricsPanel({
           {current.interventions} placed
         </span>
       </div>
-      <p className="model-note">
-        Physics estimates · Uncalibrated. Temperatures describe surfaces under
-        the selected heat conditions. Runoff is rain leaving individual cells,
-        not predicted flooding or drainage-network flow.
-      </p>
+      <div className="model-note">
+        <span>ESTIMATE</span>
+        <strong>Uncalibrated model</strong>
+      </div>
 
       <div className="metrics-grid">
         {metrics.map(({ label, value, icon: Icon, tone }) => (

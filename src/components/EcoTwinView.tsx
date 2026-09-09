@@ -199,22 +199,11 @@ function LoadedTwin({
             location={location}
           />
           <div className="geography-summary">
-            <strong>
-              {neighborhood.buildings} mapped buildings · {neighborhood.roads}{" "}
-              road segments
-            </strong>
-            <span>
-              {neighborhood.assumedHeights} heights estimated · Vertical scale
-              emphasized · Road widths approximate · Flat terrain
-            </span>
-            <span>
-              {Math.round((neighborhood.unknownCells / neighborhood.baseline.length) * 100)}% of grid has
-              unmapped ground cover
-            </span>
+            <strong>{neighborhood.buildings} BLDG</strong>
+            <span>{neighborhood.roads} ROAD</span>
+            <span>{Math.round((neighborhood.unknownCells / neighborhood.baseline.length) * 100)}% UNMAPPED</span>
             {neighborhood.buildings === 0 && (
-              <span>
-                No building footprints are available here in OpenStreetMap.
-              </span>
+              <span>No building footprints</span>
             )}
           </div>
           {editMessage && (

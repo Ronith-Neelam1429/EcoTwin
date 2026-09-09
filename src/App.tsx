@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { Map, Orbit } from "lucide-react";
+import { Box, Map, Orbit } from "lucide-react";
 import { GoogleMapView } from "./components/GoogleMapView";
 import type { TwinLocation } from "./lib/ecotwin/types";
 import "./App.css";
@@ -23,11 +23,11 @@ function App() {
     <main className="app-shell">
       <header className="workspace-header">
         <div className="workspace-identity" aria-label="EcoTwin workspace">
-          <span className="product-mark" aria-hidden="true">ET</span>
-          <strong>EcoTwin</strong>
-          <span className="header-divider" aria-hidden="true" />
-          <span className="workspace-name">Neighborhood workspace</span>
+          <span className="product-mark" aria-hidden="true"><Box size={14} /></span>
+          <strong>ECOTWIN</strong>
         </div>
+        <span className="header-divider" aria-hidden="true" />
+        <span className="workspace-name">Neighborhood model</span>
         <nav className="app-mode-switch" aria-label="Workspace view">
           <button
             type="button"
@@ -42,13 +42,9 @@ function App() {
             className={mode === "twin" ? "is-active" : ""}
             onClick={() => setMode("twin")}
           >
-            <Orbit size={15} /> 3D model
+            <Orbit size={15} /> Model
           </button>
         </nav>
-        <div className="workspace-state">
-          <span className="connection-dot" aria-hidden="true" />
-          Session active
-        </div>
       </header>
       <div className="view-stack">
         <div className={`view-pane ${mode === "real" ? "is-active" : ""}`}>
