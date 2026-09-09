@@ -179,6 +179,7 @@ function LoadedTwin({
             cells={currentRun.cells}
             rainfallMm={inputs.rainfallMm}
             viewMode={viewMode}
+            selectedTool={selectedTool}
             onCellClick={updateCell}
             neighborhood={neighborhood}
             location={location}
@@ -189,8 +190,8 @@ function LoadedTwin({
               road segments
             </strong>
             <span>
-              {neighborhood.assumedHeights} heights estimated · Road widths
-              approximate · Flat terrain
+              {neighborhood.assumedHeights} heights estimated · Vertical scale
+              emphasized · Road widths approximate · Flat terrain
             </span>
             <span>
               {Math.round((neighborhood.unknownCells / neighborhood.baseline.length) * 100)}% of grid has

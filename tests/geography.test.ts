@@ -23,6 +23,12 @@ test("metric projection preserves east, north, distance, and exact origin", () =
   assert.equal(cellAt(x, z), "10-25");
 });
 
+test("cell lookup follows a resized study-area grid", () => {
+  assert.equal(cellAt(0, 0, 16), "8-8");
+  assert.equal(cellAt(-7.5, -7.5, 16), "0-0");
+  assert.equal(cellAt(7.5, 7.5, 16), "15-15");
+});
+
 test("courtyards remain empty and polygon edges clip to 300 metres", () => {
   const clipped = clip([[[[-20, -20], [20, -20], [20, 20], [-20, 20], [-20, -20]], [[-2, -2], [-2, 2], [2, 2], [2, -2], [-2, -2]]]]);
   assert.equal(contains([0, 0], clipped), false);

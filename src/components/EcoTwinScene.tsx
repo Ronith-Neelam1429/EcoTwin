@@ -5,7 +5,15 @@ import * as THREE from "three";
 import polygonClipping, { type MultiPolygon, type Pair } from "polygon-clipping";
 import { SURFACE_COLORS } from "../lib/ecotwin/cellProperties";
 import { cellAt, cellPolygon, type Neighborhood, type AreaFeature } from "../lib/ecotwin/geography";
-import type { EcoCell, TwinLocation, ViewMode } from "../lib/ecotwin/types";
+import type { EcoCell, InterventionTool, TwinLocation, ViewMode } from "../lib/ecotwin/types";
+
+// Preserve the imported footprints and physical heights, but exaggerate raised
+// geometry so it remains legible at the neighborhood-scale camera distance.
+const BUILDING_HEIGHT_SCALE = 2.5;
+const MAX_EXTRA_BUILDING_HEIGHT = 3;
+const TREE_HEIGHT_SCALE = 2.25;
+const TREE_WIDTH_SCALE = 1.35;
+const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
 function colorFor(cell: EcoCell, mode: ViewMode, rainfallMm: number) {
   if (mode === "heat") return new THREE.Color().setHSL(0.14 * (1 - THREE.MathUtils.clamp((cell.temperature - 10) / 50, 0, 1)), 0.78, 0.53).getStyle();
@@ -37,24 +45,38 @@ function Footprint({ polygons, height = 0, y = 0.03, color, onClick }: {
   );
 }
 
-function Building({ feature, cells, mode, onSelect, rainfallMm }: {
-  rainfallMm: number; feature: AreaFeature; cells: EcoCell[]; mode: ViewMode; onSelect: (id: string) => void;
+function Building({ feature, cells, gridSize, mode, tool, onSelect, rainfallMm }: {
+  rainfallMm: number; feature: AreaFeature; cells: EcoCell[]; gridSize: number; mode: ViewMode; tool: InterventionTool; onSelect: (id: string) => void;
 }) {
+  const displayHeight = feature.height + Math.min(
+    feature.height * (BUILDING_HEIGHT_SCALE - 1),
+    MAX_EXTRA_BUILDING_HEIGHT,
+  );
   const roofs = useMemo(() => cells.filter((cell) => cell.buildingId === feature.id && (mode !== "surface" || cell.surfaceType === "green_roof"))
-    .map((cell) => ({ cell, polygons: polygonClipping.intersection(feature.polygons, cellPolygon(cell.row, cell.col)) })), [cells, feature, mode]);
+    .map((cell) => ({ cell, polygons: polygonClipping.intersection(feature.polygons, cellPolygon(cell.row, cell.col, gridSize)) })), [cells, feature, gridSize, mode]);
   function click(event: ThreeEvent<MouseEvent>) {
     event.stopPropagation();
     if (event.delta > 4) return;
-    const id = cellAt(event.point.x, event.point.z);
+    if (tool !== "green_roof" && tool !== "erase") {
+      const groundPoint = event.ray.intersectPlane(
+        GROUND_PLANE,
+        new THREE.Vector3(),
+      );
+      if (groundPoint) {
+        onSelect(cellAt(groundPoint.x, groundPoint.z, gridSize));
+        return;
+      }
+    }
+    const id = cellAt(event.point.x, event.point.z, gridSize);
     const cell = cells.find((c) => c.id === id && c.buildingId === feature.id)
       ?? cells.find((c) => c.buildingId === feature.id);
     if (cell) onSelect(cell.id);
   }
   return (
     <group>
-      <Footprint polygons={feature.polygons} height={feature.height} color={"#c9cdd3"} onClick={click} />
+      <Footprint polygons={feature.polygons} height={displayHeight} color={"#c9cdd3"} onClick={click} />
       {roofs.filter((r) => r.polygons.length).map(({ cell, polygons }) => (
-        <Footprint key={cell.id} polygons={polygons} y={feature.height + 0.035} color={colorFor(cell, mode, rainfallMm)} onClick={click} />
+        <Footprint key={cell.id} polygons={polygons} y={displayHeight + 0.035} color={colorFor(cell, mode, rainfallMm)} onClick={click} />
       ))}
     </group>
   );
@@ -62,19 +84,21 @@ function Building({ feature, cells, mode, onSelect, rainfallMm }: {
 
 function Tree({ x, z, color, onClick }: { x: number; z: number; color: string; onClick?: (event: ThreeEvent<MouseEvent>) => void }) {
   return (
-    <group position={[x, 0, z]} onClick={onClick}>
+    <group position={[x, 0, z]} scale={[TREE_WIDTH_SCALE, TREE_HEIGHT_SCALE, TREE_WIDTH_SCALE]} onClick={onClick}>
       <mesh position={[0, 0.25, 0]}><cylinderGeometry args={[0.045, 0.065, 0.5, 6]} /><meshStandardMaterial color="#79583b" /></mesh>
       <mesh position={[0, 0.65, 0]}><icosahedronGeometry args={[0.32, 1]} /><meshStandardMaterial color={color} /></mesh>
     </group>
   );
 }
 
-export function EcoTwinScene({ cells, viewMode, onCellClick, neighborhood, location, rainfallMm }: {
-  rainfallMm: number; cells: EcoCell[]; viewMode: ViewMode; onCellClick: (id: string) => void; neighborhood: Neighborhood; location: TwinLocation;
+export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neighborhood, location, rainfallMm }: {
+  rainfallMm: number; cells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: Neighborhood; location: TwinLocation;
 }) {
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
+  const gridSize = neighborhood.gridSize;
+  const halfSize = gridSize / 2;
   const heading = location.heading * Math.PI / 180;
-  const cameraPosition: [number, number, number] = [-Math.sin(heading) * 30, 31, Math.cos(heading) * 30];
+  const cameraPosition: [number, number, number] = [-Math.sin(heading) * gridSize, gridSize + 1, Math.cos(heading) * gridSize];
   function select(id: string) { setSelectedCell(id); onCellClick(id); }
   function clickCell(event: ThreeEvent<MouseEvent>, id: string) {
     event.stopPropagation();
@@ -86,13 +110,13 @@ export function EcoTwinScene({ cells, viewMode, onCellClick, neighborhood, locat
         <color attach="background" args={["#dfe3e8"]} />
         <ambientLight intensity={1.1} />
         <directionalLight position={[-15, 28, 10]} intensity={2.2} />
-        <mesh position={[0, -0.15, 0]}><boxGeometry args={[30.05, 0.25, 30.05]} /><meshStandardMaterial color="#aeb4bc" /></mesh>
+        <mesh position={[0, -0.15, 0]}><boxGeometry args={[gridSize + 0.05, 0.25, gridSize + 0.05]} /><meshStandardMaterial color="#aeb4bc" /></mesh>
         {viewMode === "surface" && neighborhood.features.filter((f) => f.surface !== "building").map((feature, index) => (
           <Footprint key={feature.id} polygons={feature.polygons} y={0.014 + index * 0.00003} color={SURFACE_COLORS[feature.surface]}
-            onClick={(e) => clickCell(e, cellAt(e.point.x, e.point.z))} />
+            onClick={(e) => clickCell(e, cellAt(e.point.x, e.point.z, gridSize))} />
         ))}
         {cells.map((cell) => {
-          const x = cell.col - 14.5, z = cell.row - 14.5;
+          const x = cell.col - halfSize + 0.5, z = cell.row - halfSize + 0.5;
           const changed = cell.surfaceType !== cell.baselineSurfaceType;
           const showSurface = viewMode !== "surface" || (changed && !cell.buildingId);
           return (
@@ -107,14 +131,14 @@ export function EcoTwinScene({ cells, viewMode, onCellClick, neighborhood, locat
           );
         })}
         {neighborhood.features.filter((f) => f.surface === "building").map((feature) => (
-          <Building key={feature.id} feature={feature} cells={cells} mode={viewMode} onSelect={select} rainfallMm={rainfallMm} />
+          <Building key={feature.id} feature={feature} cells={cells} gridSize={gridSize} mode={viewMode} tool={selectedTool} onSelect={select} rainfallMm={rainfallMm} />
         ))}
-        {neighborhood.trees.filter((t) => cells.find((c) => c.id === cellAt(...t.point))?.surfaceType === "tree").map((tree) => (
-          <Tree key={tree.id} x={tree.point[0]} z={tree.point[1]} color={colorFor(cells.find((c) => c.id === cellAt(...tree.point))!, viewMode, rainfallMm)} onClick={(e) => clickCell(e, cellAt(...tree.point))} />
+        {neighborhood.trees.filter((t) => cells.find((c) => c.id === cellAt(...t.point, gridSize))?.surfaceType === "tree").map((tree) => (
+          <Tree key={tree.id} x={tree.point[0]} z={tree.point[1]} color={colorFor(cells.find((c) => c.id === cellAt(...tree.point, gridSize))!, viewMode, rainfallMm)} onClick={(e) => clickCell(e, cellAt(...tree.point, gridSize))} />
         ))}
         <mesh position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.19, 0.27, 32]} /><meshBasicMaterial color="#2f6fed" /></mesh>
-        <Html position={[0, 0.4, -15.8]} center><span className="north-label">↑ N</span></Html>
-        <OrbitControls makeDefault enableDamping minDistance={5} maxDistance={75} maxPolarAngle={Math.PI / 2.1} />
+        <Html position={[0, 0.4, -halfSize - 0.8]} center><span className="north-label">↑ N</span></Html>
+        <OrbitControls makeDefault enableDamping minDistance={Math.max(3, gridSize / 6)} maxDistance={gridSize * 2.5} maxPolarAngle={Math.PI / 2.1} />
       </Canvas>
       <div className="scene-key">
         {viewMode === "surface" ? <><span className="unknown-swatch" />Unmapped ground · <span className="origin-swatch" />Selected location</>
