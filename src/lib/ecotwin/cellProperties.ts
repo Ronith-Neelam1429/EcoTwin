@@ -1,18 +1,59 @@
 import type { SurfaceType } from "./types";
 
-export const CELL_PROPERTIES: Record<
-  SurfaceType,
-  { heatAbsorption: number; infiltration: number; canopy: number }
-> = {
-  unknown: { heatAbsorption: 0.65, infiltration: 0.3, canopy: 0 },
-  asphalt: { heatAbsorption: 0.9, infiltration: 0.05, canopy: 0 },
-  grass: { heatAbsorption: 0.45, infiltration: 0.55, canopy: 0.1 },
-  building: { heatAbsorption: 0.75, infiltration: 0, canopy: 0 },
-  tree: { heatAbsorption: 0.35, infiltration: 0.65, canopy: 0.85 },
-  rain_garden: { heatAbsorption: 0.4, infiltration: 0.95, canopy: 0.25 },
-  green_roof: { heatAbsorption: 0.5, infiltration: 0.6, canopy: 0.35 },
-  permeable_pavement: { heatAbsorption: 0.6, infiltration: 0.65, canopy: 0 },
+/** Engineering assumptions for a whole 100 m² cell, not measured material data.
+ * Calibrate these independently of weather; see docs/physics-model.md.
+ */
+export type SurfaceParameters = {
+  albedo: number;
+  emissivity: number;
+  canopy: number;
+  shadeEfficiency: number;
+  thermalConductanceWm2K: number;
+  evaporatingFraction: number;
+  surfaceResistanceSm: number;
+  hydrology: "impervious" | "soil" | "roof" | "pavement";
+  storageMm: number;
+  interceptionMm: number;
+  aggregateStorageMm: number;
+  intakeMmH: number;
+  suctionHeadMm: number;
+  porosity: number;
+  roofRetentionMm: number;
+  roofDetentionMm: number;
+  roofDrainRatePerHour: number;
 };
+
+const common: SurfaceParameters = {
+  albedo: 0.2, emissivity: 0.95, canopy: 0, shadeEfficiency: 0.85,
+  thermalConductanceWm2K: 5, evaporatingFraction: 0, surfaceResistanceSm: 150,
+  hydrology: "impervious", storageMm: 1, interceptionMm: 0, aggregateStorageMm: 0, intakeMmH: 0,
+  suctionHeadMm: 110, porosity: 0.45,
+  roofRetentionMm: 0, roofDetentionMm: 0, roofDrainRatePerHour: 0,
+};
+export const SURFACE_PARAMETERS: Record<SurfaceType, Readonly<SurfaceParameters>> = {
+  unknown: { ...common, hydrology: "soil", intakeMmH: 30, storageMm: 2, evaporatingFraction: 0.3 },
+  asphalt: { ...common, albedo: 0.12, emissivity: 0.95, thermalConductanceWm2K: 8 },
+  grass: { ...common, albedo: 0.23, hydrology: "soil", intakeMmH: 50, storageMm: 3, evaporatingFraction: 1, surfaceResistanceSm: 100 },
+  building: { ...common, albedo: 0.2, emissivity: 0.9, thermalConductanceWm2K: 3 },
+  // An established tree and soil planting area, with an approximately 8 m crown.
+  tree: { ...common, canopy: 0.5, hydrology: "soil", intakeMmH: 50, storageMm: 5, interceptionMm: 1, evaporatingFraction: 1, surfaceResistanceSm: 100 },
+  rain_garden: { ...common, albedo: 0.23, hydrology: "soil", intakeMmH: 100, storageMm: 150, evaporatingFraction: 1, surfaceResistanceSm: 100 },
+  green_roof: { ...common, albedo: 0.25, hydrology: "roof", intakeMmH: 50, storageMm: 2, evaporatingFraction: 1, surfaceResistanceSm: 120, thermalConductanceWm2K: 1.5, roofRetentionMm: 30, roofDetentionMm: 15, roofDrainRatePerHour: 1 },
+  // Storage represents an unlined aggregate reservoir; native soil limits exfiltration.
+  permeable_pavement: { ...common, albedo: 0.3, hydrology: "pavement", intakeMmH: 100, storageMm: 1, aggregateStorageMm: 60, thermalConductanceWm2K: 6 },
+};
+
+export function validateSurfaceParameters(p: SurfaceParameters) {
+  for (const [key, value] of Object.entries(p)) {
+    if (key === "hydrology") continue;
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0)
+      throw new RangeError(`Invalid surface parameter: ${key}`);
+  }
+  for (const key of ["albedo", "emissivity", "canopy", "shadeEfficiency", "evaporatingFraction", "porosity"] as const) {
+    if (p[key] > 1) throw new RangeError(`${key} must be between 0 and 1.`);
+  }
+  if (!["impervious", "soil", "roof", "pavement"].includes(p.hydrology)) throw new RangeError("Invalid hydrology type.");
+}
 
 export const SURFACE_COLORS: Record<SurfaceType, string> = {
   unknown: "#d0cec3",

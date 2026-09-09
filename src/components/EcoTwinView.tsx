@@ -2,13 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { Compass, MapPin } from "lucide-react";
 import { applyIntervention } from "../lib/ecotwin/applyIntervention";
 import { loadNeighborhood, type Neighborhood } from "../lib/ecotwin/geography";
-import { calculateMetrics } from "../lib/ecotwin/simulation";
+import { simulateScenario } from "../lib/ecotwin/simulation";
 import type {
   EcoCell,
   InterventionTool,
   TwinLocation,
   ViewMode,
 } from "../lib/ecotwin/types";
+import { DEFAULT_SCENARIO, type ScenarioInputs } from "../lib/ecotwin/scenario";
+import { loadLocalWeather, type LocalWeather } from "../lib/ecotwin/weather";
+import { ScenarioControls } from "./ScenarioControls";
 import { EcoTwinScene } from "./EcoTwinScene";
 import { EcoTwinSidebar } from "./EcoTwinSidebar";
 import { MetricsPanel } from "./MetricsPanel";
@@ -86,8 +89,27 @@ function LoadedTwin({
   const [selectedTool, setSelectedTool] = useState<InterventionTool>("tree");
   const [viewMode, setViewMode] = useState<ViewMode>("surface");
   const [editMessage, setEditMessage] = useState("");
-  const baselineMetrics = useMemo(() => calculateMetrics(baseline), [baseline]);
-  const currentMetrics = useMemo(() => calculateMetrics(cells), [cells]);
+  const [inputs, setInputs] = useState<ScenarioInputs>({ ...DEFAULT_SCENARIO });
+  const [weather, setWeather] = useState<LocalWeather | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(true);
+  const [weatherError, setWeatherError] = useState("");
+  const [weatherAttempt, setWeatherAttempt] = useState(0);
+  const [customized, setCustomized] = useState(false);
+  useEffect(() => {
+    const controller = new AbortController();
+    loadLocalWeather(location, controller.signal).then((data) => {
+      if (controller.signal.aborted) return;
+      setWeather(data);
+      setInputs(data.inputs);
+      setCustomized(false);
+      setWeatherError("");
+    }).catch((reason: unknown) => {
+      if (!controller.signal.aborted) setWeatherError(reason instanceof Error ? reason.message : "Weather could not be loaded.");
+    }).finally(() => { if (!controller.signal.aborted) setWeatherLoading(false); });
+    return () => controller.abort();
+  }, [location, weatherAttempt]);
+  const baselineRun = useMemo(() => simulateScenario(baseline, inputs), [baseline, inputs]);
+  const currentRun = useMemo(() => simulateScenario(cells, inputs), [cells, inputs]);
 
   function updateCell(id: string) {
     const cell = cells.find((c) => c.id === id);
@@ -146,10 +168,16 @@ function LoadedTwin({
           selectedTool={selectedTool}
           onSelectTool={setSelectedTool}
           onReset={resetGrid}
-        />
+        >
+          <ScenarioControls inputs={inputs} weather={weather} loading={weatherLoading} error={weatherError} customized={customized}
+            onUseDefaults={() => { setInputs({ ...DEFAULT_SCENARIO }); setWeather(null); setCustomized(false); setWeatherError(""); }}
+            onChange={(next) => { setInputs(next); setCustomized(true); }}
+            onLoadWeather={() => { setWeatherLoading(true); setWeatherError(""); setWeatherAttempt((n) => n + 1); }} />
+        </EcoTwinSidebar>
         <div className="geographic-scene">
           <EcoTwinScene
-            cells={cells}
+            cells={currentRun.cells}
+            rainfallMm={inputs.rainfallMm}
             viewMode={viewMode}
             onCellClick={updateCell}
             neighborhood={neighborhood}
@@ -180,7 +208,7 @@ function LoadedTwin({
             </div>
           )}
         </div>
-        <MetricsPanel current={currentMetrics} baseline={baselineMetrics} />
+        <MetricsPanel current={currentRun.metrics} baseline={baselineRun.metrics} />
       </div>
     </section>
   );

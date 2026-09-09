@@ -27,7 +27,9 @@ export type EcoCell = {
   heatAbsorption: number;
   infiltration: number;
   canopy: number;
+  /** Event runoff depth in mm, not ponded flood depth. */
   water: number;
+  /** Equilibrium surface temperature in °C, not air temperature. */
   temperature: number;
   buildingId?: string;
 };
@@ -48,4 +50,12 @@ export type EcoMetrics = {
   averageInfiltration: number;
   averageCanopy: number;
   interventions: number;
+  totalRainfall: number;
+  totalInfiltration: number;
+  totalStored: number;
+  totalInterception: number;
+  totalRoofDrainage: number;
+  waterBalanceError: number;
+  maxEnergyBalanceError: number;
+  unknownAreaFraction: number;
 };

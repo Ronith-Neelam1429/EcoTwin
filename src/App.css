@@ -1146,3 +1146,31 @@ a:focus-visible {
     flex: 1;
   }
 }
+
+.scenario-controls {
+  margin-top: 20px;
+  padding: 16px 4px 4px;
+  border-top: 1px solid var(--line);
+}
+.weather-button {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px 6px;
+  border: 1px solid #bed1de;
+  border-radius: 7px;
+  background: #edf5fa;
+  color: #245773;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.weather-button:disabled { opacity: 0.65; cursor: wait; }
+.scenario-note, .model-details p { font-size: 11px; line-height: 1.55; color: #65717b; }
+.scenario-note a { color: #245773; }
+.scenario-controls details, .model-details { padding: 10px 0; border-top: 1px solid var(--line); }
+.scenario-controls summary, .model-details summary { font-size: 12px; font-weight: 600; cursor: pointer; }
+.scenario-field { display: grid; gap: 5px; margin-top: 12px; font-size: 11px; color: #53606b; }
+.scenario-field input { width: 100%; box-sizing: border-box; padding: 7px; border: 1px solid #cdd5dd; border-radius: 5px; background: white; color: #26313b; }
+.scenario-error { font-size: 11px; line-height: 1.5; color: #a23c31; }
+.scenario-reset { padding: 8px 0; border: 0; background: none; color: #426b83; font-size: 11px; cursor: pointer; }
+.model-details:first-of-type { margin-top: 18px; }

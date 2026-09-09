@@ -6,6 +6,7 @@ import {
   RotateCcw,
   TreePine,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import type { InterventionTool } from "../lib/ecotwin/types";
 
 const TOOLS: {
@@ -16,14 +17,14 @@ const TOOLS: {
 }[] = [
   {
     value: "tree",
-    label: "Add Tree",
-    detail: "Shade + canopy",
+    label: "Mature Tree",
+    detail: "Tree + soil planting area",
     icon: TreePine,
   },
   {
     value: "rain_garden",
     label: "Rain Garden",
-    detail: "Capture runoff",
+    detail: "Store rain in this cell",
     icon: Droplets,
   },
   {
@@ -50,12 +51,14 @@ type EcoTwinSidebarProps = {
   selectedTool: InterventionTool;
   onSelectTool: (tool: InterventionTool) => void;
   onReset: () => void;
+  children?: ReactNode;
 };
 
 export function EcoTwinSidebar({
   selectedTool,
   onSelectTool,
   onReset,
+  children,
 }: EcoTwinSidebarProps) {
   return (
     <aside className="twin-sidebar">
@@ -87,6 +90,7 @@ export function EcoTwinSidebar({
       <button className="reset-button" type="button" onClick={onReset}>
         <RotateCcw size={16} /> Reset all changes
       </button>
+      {children}
     </aside>
   );
 }
