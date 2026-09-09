@@ -283,6 +283,62 @@ a:focus-visible {
   white-space: nowrap;
 }
 
+.area-selector {
+  position: absolute;
+  top: 112px;
+  left: 14px;
+  z-index: 7;
+  width: min(300px, calc(100% - 28px));
+  padding: 10px 12px 8px;
+  color: #343a43;
+  background: rgb(255 255 255 / 96%);
+  border: 1px solid #d0d4da;
+  border-radius: 5px;
+  box-shadow: 0 3px 12px rgb(25 31 39 / 12%);
+  backdrop-filter: blur(8px);
+}
+
+.area-selector label,
+.area-selector label span,
+.area-selector > div {
+  display: flex;
+  align-items: center;
+}
+
+.area-selector label {
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 12px;
+}
+
+.area-selector label span {
+  gap: 6px;
+  color: #5f6873;
+  font-weight: 650;
+}
+
+.area-selector label svg {
+  color: var(--accent);
+}
+
+.area-selector label strong {
+  font-size: 13px;
+}
+
+.area-selector input {
+  width: 100%;
+  margin: 10px 0 5px;
+  accent-color: var(--accent);
+  cursor: ew-resize;
+}
+
+.area-selector > div {
+  justify-content: space-between;
+  color: #7a838e;
+  font-size: 10px;
+  font-weight: 550;
+}
+
 .location-pill svg {
   flex: 0 0 auto;
   color: var(--accent);

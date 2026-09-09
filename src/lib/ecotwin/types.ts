@@ -39,7 +39,8 @@ export type TwinLocation = {
   lng: number;
   heading: number;
   pitch: number;
-  radiusMeters: 150;
+  /** Half the width of the square study area. */
+  radiusMeters: number;
   address?: string;
 };
 

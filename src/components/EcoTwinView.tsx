@@ -51,7 +51,7 @@ export function EcoTwinView({ location }: { location: TwinLocation }) {
         </h2>
         <p>
           {error ||
-            "Finding real building outlines, roads, and mapped green areas within 150 metres of your location."}
+            `Finding real building outlines, roads, and mapped green areas within ${location.radiusMeters} metres of your location.`}
         </p>
         {error ? (
           <button
@@ -149,7 +149,7 @@ function LoadedTwin({
           </span>
           <div>
             <span className="panel-kicker">
-              Study area · 300m × 300m
+              Study area · {location.radiusMeters * 2}m × {location.radiusMeters * 2}m
             </span>
             <strong>
               {location.address ??
@@ -193,7 +193,7 @@ function LoadedTwin({
               approximate · Flat terrain
             </span>
             <span>
-              {Math.round((neighborhood.unknownCells / 900) * 100)}% of grid has
+              {Math.round((neighborhood.unknownCells / neighborhood.baseline.length) * 100)}% of grid has
               unmapped ground cover
             </span>
             {neighborhood.buildings === 0 && (

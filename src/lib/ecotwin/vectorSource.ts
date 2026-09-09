@@ -47,11 +47,12 @@ export async function loadVectorNeighborhood(location: TwinLocation) {
   const source = await metadata;
   if (!Array.isArray(source.tiles) || !Number.isFinite(source.maxzoom)) throw new Error("Map source configuration is unavailable.");
   const zoom = Math.min(source.maxzoom, 14);
-  const dLat = 170 / 111320, dLng = dLat / Math.cos(location.lat * Math.PI / 180);
+  const fetchRadius = location.radiusMeters + 20;
+  const dLat = fetchRadius / 111320, dLng = dLat / Math.cos(location.lat * Math.PI / 180);
   const nw = tilePosition(location.lng - dLng, location.lat + dLat, zoom);
   const se = tilePosition(location.lng + dLng, location.lat - dLat, zoom);
   const features: Feature[] = [];
-  // A 300m scene requires at most a few local tiles. Fetch sequentially to limit
+  // Fetch sequentially to limit
   // public-service load; HTTP caching reuses them for nearby locations.
   for (let x = nw.x; x <= se.x; x++) for (let y = nw.y; y <= se.y; y++) {
     const tileX = (x + 2 ** zoom) % (2 ** zoom);

@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
-import { Box, LocateFixed, MapPin, PersonStanding, X } from "lucide-react";
+import { Box, LocateFixed, MapPin, PersonStanding, Scaling, X } from "lucide-react";
 import type { TwinLocation } from "../lib/ecotwin/types";
 
 const SEATTLE = { lat: 47.6062, lng: -122.3321 };
+const DEFAULT_AREA_METERS = 300;
+const MIN_AREA_METERS = 100;
+const MAX_AREA_METERS = 500;
+const EARTH_RADIUS_METERS = 6378137;
 const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim();
 let mapsLoaderConfigured = false;
 
@@ -51,10 +55,25 @@ function toLiteral(location: google.maps.LatLng | google.maps.LatLngLiteral) {
   return location as google.maps.LatLngLiteral;
 }
 
+function squareBounds(center: google.maps.LatLngLiteral, sideMeters: number) {
+  const half = sideMeters / 2;
+  const latDelta = half / EARTH_RADIUS_METERS * 180 / Math.PI;
+  const lngDelta = latDelta / Math.cos(center.lat * Math.PI / 180);
+  return {
+    north: center.lat + latDelta,
+    south: center.lat - latDelta,
+    east: center.lng + lngDelta,
+    west: center.lng - lngDelta,
+  };
+}
+
 export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
   const mapElement = useRef<HTMLDivElement>(null);
   const autocompleteMount = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<google.maps.Map | null>(null);
+  const locationMarker = useRef<google.maps.Marker | null>(null);
+  const studyArea = useRef<google.maps.Rectangle | null>(null);
+  const areaSize = useRef(DEFAULT_AREA_METERS);
   const selectedLocation = useRef<
     google.maps.LatLng | google.maps.LatLngLiteral
   >(SEATTLE);
@@ -62,6 +81,7 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
     GOOGLE_MAPS_API_KEY ? "loading" : "missing-key",
   );
   const [placeName, setPlaceName] = useState("Seattle");
+  const [areaSizeMeters, setAreaSizeMeters] = useState(DEFAULT_AREA_METERS);
   const [addressWasTyped, setAddressWasTyped] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const [streetViewActive, setStreetViewActive] = useState(false);
@@ -94,6 +114,9 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
         const map = new Map(mapElement.current, {
           center: initialLocation.center,
           zoom: 16,
+          mapTypeId: google.maps.MapTypeId.SATELLITE,
+          tilt: 0,
+          heading: 0,
           mapTypeControl: false,
           streetViewControl: true,
           fullscreenControl: true,
@@ -104,6 +127,22 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
           ],
         });
         mapInstance.current = map;
+        locationMarker.current = new google.maps.Marker({
+          map,
+          position: initialLocation.center,
+          title: initialLocation.label,
+          animation: google.maps.Animation.DROP,
+        });
+        studyArea.current = new google.maps.Rectangle({
+          map,
+          bounds: squareBounds(initialLocation.center, DEFAULT_AREA_METERS),
+          clickable: false,
+          fillColor: "#2f6fed",
+          fillOpacity: 0.16,
+          strokeColor: "#ffffff",
+          strokeOpacity: 0.95,
+          strokeWeight: 3,
+        });
 
         const autocomplete = new PlaceAutocompleteElement({
           placeholder: "Search an address or place",
@@ -125,6 +164,12 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
             if (!place.location || !mapInstance.current) return;
 
             selectedLocation.current = place.location;
+            const selectedPoint = toLiteral(place.location);
+            locationMarker.current?.setPosition(place.location);
+            locationMarker.current?.setTitle(
+              place.formattedAddress ?? place.displayName ?? "Selected location",
+            );
+            studyArea.current?.setBounds(squareBounds(selectedPoint, areaSize.current));
             setPlaceName(
               place.formattedAddress ??
                 place.displayName ??
@@ -148,6 +193,26 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
         autocomplete.addEventListener("gmp-error", () => setSearchError(true));
         autocompleteMount.current.replaceChildren(autocomplete);
 
+        map.addListener("click", async (event: google.maps.MapMouseEvent) => {
+          if (!event.latLng) return;
+          const point = toLiteral(event.latLng);
+          selectedLocation.current = point;
+          locationMarker.current?.setPosition(point);
+          locationMarker.current?.setTitle("Selected location");
+          studyArea.current?.setBounds(squareBounds(point, areaSize.current));
+          setAddressWasTyped(true);
+          setMessage("");
+          try {
+            const response = await geocoder.geocode({ location: point });
+            if (cancelled) return;
+            const label = response.results[0]?.formatted_address ?? "Selected location";
+            setPlaceName(label);
+            locationMarker.current?.setTitle(label);
+          } catch {
+            if (!cancelled) setPlaceName("Selected location");
+          }
+        });
+
         const panorama = map.getStreetView();
         panorama.addListener("visible_changed", () => {
           if (cancelled) return;
@@ -169,6 +234,10 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
     void initializeMap();
     return () => {
       cancelled = true;
+      locationMarker.current?.setMap(null);
+      studyArea.current?.setMap(null);
+      locationMarker.current = null;
+      studyArea.current = null;
       mapInstance.current = null;
     };
   }, []);
@@ -180,6 +249,18 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
     mapInstance.current?.getStreetView().setVisible(false);
     mapInstance.current?.panTo(SEATTLE);
     mapInstance.current?.setZoom(16);
+    mapInstance.current?.setTilt(0);
+    mapInstance.current?.setHeading(0);
+    locationMarker.current?.setPosition(SEATTLE);
+    locationMarker.current?.setTitle("Seattle");
+    studyArea.current?.setBounds(squareBounds(SEATTLE, areaSizeMeters));
+  }
+
+  function resizeStudyArea(sideMeters: number) {
+    areaSize.current = sideMeters;
+    setAreaSizeMeters(sideMeters);
+    const center = toLiteral(selectedLocation.current);
+    studyArea.current?.setBounds(squareBounds(center, sideMeters));
   }
 
   async function toggleStreetView() {
@@ -230,7 +311,7 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
       lng: position.lng,
       heading: panorama.getVisible() ? pov.heading : 0,
       pitch: panorama.getVisible() ? pov.pitch : 0,
-      radiusMeters: 150,
+      radiusMeters: areaSizeMeters / 2,
       ...(addressWasTyped ? { address: placeName } : {}),
     });
   }
@@ -284,6 +365,23 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
           <div className="location-pill">
             <MapPin size={15} />
             {placeName}
+          </div>
+          <div className="area-selector">
+            <label htmlFor="study-area-size">
+              <span><Scaling size={15} /> Model area</span>
+              <strong>{areaSizeMeters}m × {areaSizeMeters}m</strong>
+            </label>
+            <input
+              id="study-area-size"
+              type="range"
+              min={MIN_AREA_METERS}
+              max={MAX_AREA_METERS}
+              step={20}
+              value={areaSizeMeters}
+              onChange={(event) => resizeStudyArea(Number(event.target.value))}
+              aria-valuetext={`${areaSizeMeters} metres square`}
+            />
+            <div><span>{MIN_AREA_METERS}m</span><span>Maximum {MAX_AREA_METERS}m</span></div>
           </div>
           <button
             className="recenter-button"
