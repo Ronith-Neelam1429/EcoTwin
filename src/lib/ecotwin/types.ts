@@ -31,7 +31,14 @@ export type EcoCell = {
   water: number;
   /** Equilibrium surface temperature in °C, not air temperature. */
   temperature: number;
+  /** Fraction of this 10 m cell inside the selected study boundary. */
+  coverage: number;
   buildingId?: string;
+};
+
+export type GeoPoint = {
+  lat: number;
+  lng: number;
 };
 
 export type TwinLocation = {
@@ -39,8 +46,10 @@ export type TwinLocation = {
   lng: number;
   heading: number;
   pitch: number;
-  /** Half the width of the square study area. */
+  /** Half the width of the square that contains the study area. */
   radiusMeters: number;
+  /** User-drawn study boundary. Omitted for the standard square area. */
+  boundary?: GeoPoint[];
   address?: string;
 };
 

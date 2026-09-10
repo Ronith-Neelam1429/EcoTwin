@@ -300,24 +300,30 @@ a:focus-visible {
 
 .area-selector label,
 .area-selector label span,
-.area-selector > div {
+.area-selector-heading,
+.area-selector-heading span,
+.area-range-labels,
+.area-mode-toggle,
+.draw-controls > div {
   display: flex;
   align-items: center;
 }
 
-.area-selector label {
+.area-selector label,
+.area-selector-heading {
   justify-content: space-between;
   gap: 12px;
   font-size: 12px;
 }
 
-.area-selector label span {
+.area-selector label span,
+.area-selector-heading span {
   gap: 6px;
   color: #5f6873;
   font-weight: 650;
 }
 
-.area-selector label svg {
+.area-selector-heading svg {
   color: var(--accent);
 }
 
@@ -332,11 +338,74 @@ a:focus-visible {
   cursor: ew-resize;
 }
 
-.area-selector > div {
+.area-range-labels {
   justify-content: space-between;
   color: #7a838e;
   font-size: 10px;
   font-weight: 550;
+}
+
+.area-mode-toggle {
+  gap: 3px;
+  margin: 9px 0 10px;
+  padding: 3px;
+  background: #eef0f3;
+  border: 1px solid #d9dde2;
+  border-radius: 4px;
+}
+
+.area-mode-toggle button {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  min-height: 30px;
+  gap: 6px;
+  color: #59626d;
+  background: transparent;
+  border: 0;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.area-mode-toggle button.is-active {
+  color: #214f9f;
+  background: #fff;
+  box-shadow: 0 1px 3px rgb(24 29 36 / 14%);
+}
+
+.draw-controls > span {
+  display: block;
+  margin-bottom: 8px;
+  color: #69727d;
+  font-size: 11px;
+}
+
+.draw-controls > div {
+  gap: 6px;
+}
+
+.draw-controls button {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  gap: 5px;
+  padding: 0 9px;
+  color: #4e5864;
+  background: #fff;
+  border: 1px solid #d2d7dd;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.draw-controls button:disabled,
+.create-twin-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 .location-pill svg {

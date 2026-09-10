@@ -54,7 +54,9 @@ export function EcoTwinView({ location }: { location: TwinLocation }) {
         </h2>
         <p>
           {error ||
-            `Finding real building outlines, roads, and mapped green areas within ${location.radiusMeters} metres of your location.`}
+            (location.boundary
+              ? "Finding real building outlines, roads, and mapped green areas inside your custom boundary."
+              : `Finding real building outlines, roads, and mapped green areas within ${location.radiusMeters} metres of your location.`)}
         </p>
         {error ? (
           <button
@@ -99,6 +101,11 @@ function LoadedTwin({
   const [weatherError, setWeatherError] = useState("");
   const [weatherAttempt, setWeatherAttempt] = useState(0);
   const [customized, setCustomized] = useState(false);
+  const totalSelectedCoverage = baseline.reduce((sum, cell) => sum + cell.coverage, 0);
+  const selectedAreaM2 = totalSelectedCoverage * 100;
+  const unknownAreaFraction = totalSelectedCoverage
+    ? baseline.reduce((sum, cell) => sum + (cell.surfaceType === "unknown" ? cell.coverage : 0), 0) / totalSelectedCoverage
+    : 0;
   useEffect(() => {
     const controller = new AbortController();
     loadLocalWeather(location, controller.signal).then((data) => {
@@ -153,7 +160,9 @@ function LoadedTwin({
           </span>
           <div>
             <span className="panel-kicker">
-              Study area · {location.radiusMeters * 2}m × {location.radiusMeters * 2}m
+              {location.boundary
+                ? `Custom study area · ${Math.round(selectedAreaM2).toLocaleString()} m²`
+                : `Study area · ${location.radiusMeters * 2}m × ${location.radiusMeters * 2}m`}
             </span>
             <strong>
               {location.address ??
@@ -201,7 +210,7 @@ function LoadedTwin({
           <div className="geography-summary">
             <strong>{neighborhood.buildings} BLDG</strong>
             <span>{neighborhood.roads} ROAD</span>
-            <span>{Math.round((neighborhood.unknownCells / neighborhood.baseline.length) * 100)}% UNMAPPED</span>
+            <span>{Math.round(unknownAreaFraction * 100)}% UNMAPPED</span>
             {neighborhood.buildings === 0 && (
               <span>No building footprints</span>
             )}

@@ -9,7 +9,7 @@ import type { EcoCell, SurfaceType } from "../src/lib/ecotwin/types";
 
 const close = (a: number, b: number, tolerance = 1e-8) => assert.ok(Math.abs(a - b) < tolerance, `${a} differs from ${b}`);
 const cell = (surfaceType: SurfaceType, id = "0-0"): EcoCell => ({ id, row: 0, col: 0, surfaceType,
-  baselineSurfaceType: surfaceType, elevation: 0, ...calculateCellEnvironment(surfaceType) });
+  baselineSurfaceType: surfaceType, elevation: 0, coverage: 1, ...calculateCellEnvironment(surfaceType) });
 
 test("impervious area benchmark: 25 mm rain minus 1 mm storage over 100 m² = 2.4 m³ runoff", () => {
   const { metrics } = simulateScenario([cell("asphalt")]);
@@ -17,6 +17,14 @@ test("impervious area benchmark: 25 mm rain minus 1 mm storage over 100 m² = 2.
   close(metrics.totalRunoff, 2.4);
   close(metrics.totalStored, 0.1);
   close(metrics.totalInfiltration, 0);
+});
+
+test("partial boundary cells contribute only their selected area to totals", () => {
+  const halfCell = { ...cell("asphalt"), coverage: 0.5 };
+  const { metrics } = simulateScenario([halfCell]);
+  close(metrics.totalRainfall, 1.25);
+  close(metrics.totalRunoff, 1.2);
+  close(metrics.totalStored, 0.05);
 });
 
 test("ponded Green–Ampt matches independently calculated elapsed time and handles initial singularity", () => {

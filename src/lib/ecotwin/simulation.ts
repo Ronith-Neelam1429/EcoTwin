@@ -44,6 +44,8 @@ export function simulateScenario(
     totalStored: 0, totalInterception: 0, totalRoofDrainage: 0,
     waterBalanceError: 0, maxEnergyBalanceError: 0, unknownAreaFraction: 0,
   };
+  const coverageFor = (cell: EcoCell) => cell.coverage ?? 1;
+  const totalCoverage = cells.reduce((sum, cell) => sum + coverageFor(cell), 0);
   const simulatedCells = cells.map((cell) => {
     let profile = profiles.get(cell.surfaceType);
     if (!profile) {
@@ -53,8 +55,10 @@ export function simulateScenario(
       profiles.set(cell.surfaceType, profile);
     }
     const { p, physics: { water, heat } } = profile;
-    const volumePerMm = CELL_AREA_M2 / 1000; // 1 mm over 100 m² = 0.1 m³
-    metrics.averageTemperature += heat.temperatureC / cells.length;
+    const coverage = coverageFor(cell);
+    const weight = totalCoverage ? coverage / totalCoverage : 0;
+    const volumePerMm = CELL_AREA_M2 * coverage / 1000; // 1 mm over 100 m² = 0.1 m³
+    metrics.averageTemperature += heat.temperatureC * weight;
     metrics.maxTemperature = Math.max(metrics.maxTemperature, heat.temperatureC);
     metrics.totalRunoff += water.runoffMm * volumePerMm;
     metrics.totalRainfall += water.rainfallMm * volumePerMm;
@@ -62,9 +66,9 @@ export function simulateScenario(
     metrics.totalStored += water.storedMm * volumePerMm;
     metrics.totalInterception += water.interceptedMm * volumePerMm;
     metrics.totalRoofDrainage += water.roofDrainageMm * volumePerMm;
-    metrics.averageCanopy += p.canopy / cells.length;
+    metrics.averageCanopy += p.canopy * weight;
     metrics.interventions += Number(cell.surfaceType !== cell.baselineSurfaceType);
-    metrics.unknownAreaFraction += Number(cell.surfaceType === "unknown") / cells.length;
+    metrics.unknownAreaFraction += Number(cell.surfaceType === "unknown") * weight;
     metrics.maxEnergyBalanceError = Math.max(metrics.maxEnergyBalanceError, Math.abs(heat.balanceErrorWm2));
     return { ...cell, ...environment(p, profile.physics) };
   });

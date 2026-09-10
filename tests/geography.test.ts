@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildingHeight, cellAt, clip, contains, neighborhoodQuery, parseMeters, parseNeighborhood, project } from "../src/lib/ecotwin/geography";
+import { buildingHeight, cellAt, clip, contains, neighborhoodQuery, parseMeters, parseNeighborhood, project, studyBoundary } from "../src/lib/ecotwin/geography";
 import { applyIntervention } from "../src/lib/ecotwin/applyIntervention";
 import { tileTags } from "../src/lib/ecotwin/vectorSource";
 import { calculateMetrics } from "../src/lib/ecotwin/simulation";
@@ -67,6 +67,25 @@ test("empty coverage is explicitly unknown, not synthetic terrain", () => {
   assert.equal(n.buildings, 0);
   assert.equal(n.features.length, 0);
   assert.equal(n.unknownCells, 900);
+});
+
+test("a custom border clips the modeled cells and preserves fractional edge area", () => {
+  const geoPoint = (east: number, north: number) => {
+    const p = point(east, north);
+    return { lng: p.lon, lat: p.lat };
+  };
+  const custom: TwinLocation = {
+    ...origin,
+    radiusMeters: 100,
+    boundary: [geoPoint(0, 80), geoPoint(80, 0), geoPoint(0, -80), geoPoint(-80, 0)],
+  };
+  const n = parseNeighborhood({ elements: [] }, custom);
+  assert.equal(n.gridSize, 20);
+  assert.ok(n.baseline.length < 400);
+  assert.ok(n.baseline.some((cell) => cell.coverage > 0 && cell.coverage < 1));
+  assert.ok(Math.abs(n.baseline.reduce((sum, cell) => sum + cell.coverage, 0) - 128) < 1e-8);
+  assert.equal(contains([0, 0], studyBoundary(custom)), true);
+  assert.equal(contains([9, 9], studyBoundary(custom)), false);
 });
 
 test("green roofs preserve buildings; ground tools cannot remove houses; erase restores baseline", () => {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { importLibrary, setOptions } from "@googlemaps/js-api-loader";
-import { Box, LocateFixed, MapPin, PersonStanding, Scaling, X } from "lucide-react";
-import type { TwinLocation } from "../lib/ecotwin/types";
+import { Box, LocateFixed, MapPin, PersonStanding, Scaling, Square, Spline, Trash2, Undo2, X } from "lucide-react";
+import type { GeoPoint, TwinLocation } from "../lib/ecotwin/types";
 
 const SEATTLE = { lat: 47.6062, lng: -122.3321 };
 const DEFAULT_AREA_METERS = 300;
@@ -12,6 +12,7 @@ const GOOGLE_MAPS_API_KEY = import.meta.env.VITE_GOOGLE_MAPS_API_KEY?.trim();
 let mapsLoaderConfigured = false;
 
 type MapStatus = "loading" | "ready" | "missing-key" | "error";
+type AreaMode = "square" | "custom";
 
 type GoogleMapViewProps = {
   onCreateTwin: (location: TwinLocation) => void;
@@ -67,13 +68,57 @@ function squareBounds(center: google.maps.LatLngLiteral, sideMeters: number) {
   };
 }
 
+function customAreaGeometry(points: GeoPoint[]) {
+  const minLat = Math.min(...points.map((point) => point.lat));
+  const maxLat = Math.max(...points.map((point) => point.lat));
+  const minLng = Math.min(...points.map((point) => point.lng));
+  const maxLng = Math.max(...points.map((point) => point.lng));
+  const center = { lat: (minLat + maxLat) / 2, lng: (minLng + maxLng) / 2 };
+  const heightMeters = (maxLat - minLat) * Math.PI / 180 * EARTH_RADIUS_METERS;
+  const widthMeters = (maxLng - minLng) * Math.PI / 180 * EARTH_RADIUS_METERS * Math.cos(center.lat * Math.PI / 180);
+  const projected = points.map((point) => ({
+    x: (point.lng - center.lng) * Math.PI / 180 * EARTH_RADIUS_METERS * Math.cos(center.lat * Math.PI / 180),
+    y: (point.lat - center.lat) * Math.PI / 180 * EARTH_RADIUS_METERS,
+  }));
+  const areaMeters2 = Math.abs(projected.reduce((sum, point, index) => {
+    const next = projected[(index + 1) % projected.length];
+    return sum + point.x * next.y - next.x * point.y;
+  }, 0)) / 2;
+  return {
+    center,
+    widthMeters,
+    heightMeters,
+    areaMeters2,
+    radiusMeters: Math.max(10, Math.ceil(Math.max(widthMeters, heightMeters) / 20) * 10),
+  };
+}
+
+function boundaryCrossesItself(points: GeoPoint[]) {
+  const orientation = (a: GeoPoint, b: GeoPoint, c: GeoPoint) =>
+    Math.sign((b.lng - a.lng) * (c.lat - a.lat) - (b.lat - a.lat) * (c.lng - a.lng));
+  const intersects = (a: GeoPoint, b: GeoPoint, c: GeoPoint, d: GeoPoint) =>
+    orientation(a, b, c) !== orientation(a, b, d) && orientation(c, d, a) !== orientation(c, d, b);
+  return points.some((point, index) => {
+    const nextIndex = (index + 1) % points.length;
+    return points.some((other, otherIndex) => {
+      const otherNextIndex = (otherIndex + 1) % points.length;
+      if (index === otherIndex || index === otherNextIndex || nextIndex === otherIndex) return false;
+      return intersects(point, points[nextIndex], other, points[otherNextIndex]);
+    });
+  });
+}
+
 export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
   const mapElement = useRef<HTMLDivElement>(null);
   const autocompleteMount = useRef<HTMLDivElement>(null);
   const mapInstance = useRef<google.maps.Map | null>(null);
   const locationMarker = useRef<google.maps.Marker | null>(null);
   const studyArea = useRef<google.maps.Rectangle | null>(null);
+  const customArea = useRef<google.maps.Polygon | null>(null);
+  const boundaryMarkers = useRef<google.maps.Marker[]>([]);
   const areaSize = useRef(DEFAULT_AREA_METERS);
+  const areaMode = useRef<AreaMode>("square");
+  const customBoundary = useRef<GeoPoint[]>([]);
   const selectedLocation = useRef<
     google.maps.LatLng | google.maps.LatLngLiteral
   >(SEATTLE);
@@ -82,6 +127,8 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
   );
   const [placeName, setPlaceName] = useState("Seattle");
   const [areaSizeMeters, setAreaSizeMeters] = useState(DEFAULT_AREA_METERS);
+  const [selectionMode, setSelectionMode] = useState<AreaMode>("square");
+  const [customBoundaryPoints, setCustomBoundaryPoints] = useState<GeoPoint[]>([]);
   const [addressWasTyped, setAddressWasTyped] = useState(false);
   const [searchError, setSearchError] = useState(false);
   const [streetViewActive, setStreetViewActive] = useState(false);
@@ -143,6 +190,17 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
           strokeOpacity: 0.95,
           strokeWeight: 3,
         });
+        customArea.current = new google.maps.Polygon({
+          map,
+          paths: [],
+          clickable: false,
+          fillColor: "#2f6fed",
+          fillOpacity: 0.2,
+          strokeColor: "#ffffff",
+          strokeOpacity: 0.98,
+          strokeWeight: 3,
+          visible: false,
+        });
 
         const autocomplete = new PlaceAutocompleteElement({
           placeholder: "Search an address or place",
@@ -170,6 +228,7 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
               place.formattedAddress ?? place.displayName ?? "Selected location",
             );
             studyArea.current?.setBounds(squareBounds(selectedPoint, areaSize.current));
+            updateCustomBoundary([]);
             setPlaceName(
               place.formattedAddress ??
                 place.displayName ??
@@ -177,7 +236,7 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
             );
             setAddressWasTyped(true);
             setSearchError(false);
-            setMessage("");
+            setMessage(areaMode.current === "custom" ? boundaryMessage(0) : "");
             mapInstance.current.getStreetView().setVisible(false);
 
             if (place.viewport) mapInstance.current.fitBounds(place.viewport);
@@ -196,6 +255,17 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
         map.addListener("click", async (event: google.maps.MapMouseEvent) => {
           if (!event.latLng) return;
           const point = toLiteral(event.latLng);
+          if (areaMode.current === "custom") {
+            const next = [...customBoundary.current, point];
+            const geometry = customAreaGeometry(next);
+            if (geometry.widthMeters > MAX_AREA_METERS || geometry.heightMeters > MAX_AREA_METERS) {
+              setMessage(`Custom boundaries can be up to ${MAX_AREA_METERS}m wide and tall.`);
+              return;
+            }
+            updateCustomBoundary(next);
+            setMessage(boundaryMessage(next.length));
+            return;
+          }
           selectedLocation.current = point;
           locationMarker.current?.setPosition(point);
           locationMarker.current?.setTitle("Selected location");
@@ -236,10 +306,16 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
       cancelled = true;
       locationMarker.current?.setMap(null);
       studyArea.current?.setMap(null);
+      customArea.current?.setMap(null);
+      boundaryMarkers.current.forEach((marker) => marker.setMap(null));
       locationMarker.current = null;
       studyArea.current = null;
+      customArea.current = null;
+      boundaryMarkers.current = [];
       mapInstance.current = null;
     };
+    // The map owns these listeners for its lifetime; boundary state is read from refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function recenterMap() {
@@ -254,6 +330,8 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
     locationMarker.current?.setPosition(SEATTLE);
     locationMarker.current?.setTitle("Seattle");
     studyArea.current?.setBounds(squareBounds(SEATTLE, areaSizeMeters));
+    updateCustomBoundary([]);
+    if (areaMode.current === "custom") setMessage(boundaryMessage(0));
   }
 
   function resizeStudyArea(sideMeters: number) {
@@ -261,6 +339,106 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
     setAreaSizeMeters(sideMeters);
     const center = toLiteral(selectedLocation.current);
     studyArea.current?.setBounds(squareBounds(center, sideMeters));
+  }
+
+  function boundaryMessage(pointCount: number) {
+    if (pointCount >= 3) return `${pointCount} points selected. Drag a red point to reposition it, or add another point.`;
+    if (pointCount) return `Add ${3 - pointCount} more ${pointCount === 2 ? "point" : "points"} to complete the boundary.`;
+    return "Click the map to place the corners of your boundary.";
+  }
+
+  function rebuildBoundaryMarkers(points: GeoPoint[]) {
+    boundaryMarkers.current.forEach((marker) => marker.setMap(null));
+    const map = mapInstance.current;
+    if (!map) {
+      boundaryMarkers.current = [];
+      return;
+    }
+    boundaryMarkers.current = points.map((point, index) => {
+      let dragStart = point;
+      const marker = new google.maps.Marker({
+        map: areaMode.current === "custom" ? map : null,
+        position: point,
+        draggable: true,
+        clickable: true,
+        cursor: "grab",
+        title: `Boundary point ${index + 1}. Drag to reposition.`,
+        zIndex: 20,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          scale: 7,
+          fillColor: "#e53935",
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeOpacity: 1,
+          strokeWeight: 2,
+        },
+      });
+      marker.addListener("dragstart", () => {
+        dragStart = customBoundary.current[index];
+      });
+      marker.addListener("drag", () => {
+        const position = marker.getPosition();
+        if (!position) return;
+        const preview = customBoundary.current.map((current, pointIndex) =>
+          pointIndex === index ? toLiteral(position) : current);
+        customArea.current?.setPath(preview);
+      });
+      marker.addListener("dragend", () => {
+        const position = marker.getPosition();
+        if (!position) return;
+        const next = customBoundary.current.map((current, pointIndex) =>
+          pointIndex === index ? toLiteral(position) : current);
+        const geometry = customAreaGeometry(next);
+        if (geometry.widthMeters > MAX_AREA_METERS || geometry.heightMeters > MAX_AREA_METERS) {
+          marker.setPosition(dragStart);
+          customArea.current?.setPath(customBoundary.current);
+          setMessage(`Custom boundaries can be up to ${MAX_AREA_METERS}m wide and tall.`);
+          return;
+        }
+        if (next.length >= 3 && (geometry.areaMeters2 < 1 || boundaryCrossesItself(next))) {
+          marker.setPosition(dragStart);
+          customArea.current?.setPath(customBoundary.current);
+          setMessage("That position would make the boundary invalid. Try dragging the point somewhere else.");
+          return;
+        }
+        customBoundary.current = next;
+        setCustomBoundaryPoints(next);
+        customArea.current?.setPath(next);
+        setMessage(boundaryMessage(next.length));
+      });
+      return marker;
+    });
+  }
+
+  function updateCustomBoundary(points: GeoPoint[]) {
+    customBoundary.current = points;
+    setCustomBoundaryPoints(points);
+    customArea.current?.setPath(points);
+    rebuildBoundaryMarkers(points);
+  }
+
+  function setAreaSelectionMode(mode: AreaMode) {
+    areaMode.current = mode;
+    setSelectionMode(mode);
+    const map = mapInstance.current;
+    studyArea.current?.setVisible(mode === "square");
+    customArea.current?.setVisible(mode === "custom");
+    boundaryMarkers.current.forEach((marker) => marker.setMap(mode === "custom" ? map : null));
+    locationMarker.current?.setMap(mode === "square" ? map : null);
+    map?.setOptions({ draggableCursor: mode === "custom" ? "crosshair" : undefined });
+    setMessage(mode === "custom" ? boundaryMessage(customBoundary.current.length) : "");
+  }
+
+  function undoCustomPoint() {
+    const next = customBoundary.current.slice(0, -1);
+    updateCustomBoundary(next);
+    setMessage(boundaryMessage(next.length));
+  }
+
+  function clearCustomBoundary() {
+    updateCustomBoundary([]);
+    setMessage(boundaryMessage(0));
   }
 
   async function toggleStreetView() {
@@ -306,12 +484,27 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
 
     const position = toLiteral(rawPosition);
     const pov = panorama.getPov();
+    const boundary = selectionMode === "custom" ? customBoundaryPoints : undefined;
+    if (boundary && boundary.length < 3) {
+      setMessage("Add at least 3 points to complete the boundary.");
+      return;
+    }
+    const geometry = boundary ? customAreaGeometry(boundary) : null;
+    if (geometry && geometry.areaMeters2 < 1) {
+      setMessage("The boundary needs to enclose an area. Move or add a point and try again.");
+      return;
+    }
+    if (boundary && boundaryCrossesItself(boundary)) {
+      setMessage("Boundary lines cannot cross. Undo a point and trace around the outside edge.");
+      return;
+    }
     onCreateTwin({
-      lat: position.lat,
-      lng: position.lng,
+      lat: geometry?.center.lat ?? position.lat,
+      lng: geometry?.center.lng ?? position.lng,
       heading: panorama.getVisible() ? pov.heading : 0,
       pitch: panorama.getVisible() ? pov.pitch : 0,
-      radiusMeters: areaSizeMeters / 2,
+      radiusMeters: geometry?.radiusMeters ?? areaSizeMeters / 2,
+      ...(boundary ? { boundary } : {}),
       ...(addressWasTyped ? { address: placeName } : {}),
     });
   }
@@ -367,21 +560,39 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
             {placeName}
           </div>
           <div className="area-selector">
-            <label htmlFor="study-area-size">
-              <span><Scaling size={15} /> Model area</span>
-              <strong>{areaSizeMeters}m × {areaSizeMeters}m</strong>
-            </label>
-            <input
-              id="study-area-size"
-              type="range"
-              min={MIN_AREA_METERS}
-              max={MAX_AREA_METERS}
-              step={20}
-              value={areaSizeMeters}
-              onChange={(event) => resizeStudyArea(Number(event.target.value))}
-              aria-valuetext={`${areaSizeMeters} metres square`}
-            />
-            <div><span>{MIN_AREA_METERS}m</span><span>Maximum {MAX_AREA_METERS}m</span></div>
+            <div className="area-selector-heading"><span><Scaling size={15} /> Model area</span></div>
+            <div className="area-mode-toggle" aria-label="Study area shape">
+              <button type="button" className={selectionMode === "square" ? "is-active" : ""} onClick={() => setAreaSelectionMode("square")}>
+                <Square size={14} /> Square
+              </button>
+              <button type="button" className={selectionMode === "custom" ? "is-active" : ""} onClick={() => setAreaSelectionMode("custom")}>
+                <Spline size={14} /> Draw border
+              </button>
+            </div>
+            {selectionMode === "square" ? (
+              <>
+                <label htmlFor="study-area-size"><span>Square size</span><strong>{areaSizeMeters}m × {areaSizeMeters}m</strong></label>
+                <input
+                  id="study-area-size"
+                  type="range"
+                  min={MIN_AREA_METERS}
+                  max={MAX_AREA_METERS}
+                  step={20}
+                  value={areaSizeMeters}
+                  onChange={(event) => resizeStudyArea(Number(event.target.value))}
+                  aria-valuetext={`${areaSizeMeters} metres square`}
+                />
+                <div className="area-range-labels"><span>{MIN_AREA_METERS}m</span><span>Maximum {MAX_AREA_METERS}m</span></div>
+              </>
+            ) : (
+              <div className="draw-controls">
+                <span>{customBoundaryPoints.length >= 3 ? `${customBoundaryPoints.length} boundary points` : "Click at least 3 points on the map"}</span>
+                <div>
+                  <button type="button" onClick={undoCustomPoint} disabled={!customBoundaryPoints.length}><Undo2 size={13} /> Undo</button>
+                  <button type="button" onClick={clearCustomBoundary} disabled={!customBoundaryPoints.length}><Trash2 size={13} /> Clear</button>
+                </div>
+              </div>
+            )}
           </div>
           <button
             className="recenter-button"
@@ -403,6 +614,7 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
             className="create-twin-button"
             type="button"
             onClick={createDigitalTwin}
+            disabled={selectionMode === "custom" && customBoundaryPoints.length < 3}
           >
             <Box size={18} />
             Create Digital Twin

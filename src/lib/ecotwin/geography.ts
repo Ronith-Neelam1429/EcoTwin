@@ -25,6 +25,7 @@ export type Neighborhood = {
   assumedHeights: number;
   unknownCells: number;
   gridSize: number;
+  boundary: MultiPolygon;
   timestamp?: string;
 };
 
@@ -36,6 +37,16 @@ function gridSizeFor(origin: TwinLocation) {
 
 function boundaryFor(halfSize: number): Polygon {
   return [[[-halfSize, -halfSize], [halfSize, -halfSize], [halfSize, halfSize], [-halfSize, halfSize], [-halfSize, -halfSize]]];
+}
+
+export function studyBoundary(origin: TwinLocation): MultiPolygon {
+  if (origin.boundary && origin.boundary.length >= 3) {
+    const ring = origin.boundary.map(({ lng, lat }) => project(lng, lat, origin));
+    const first = ring[0], last = ring[ring.length - 1];
+    if (first[0] !== last[0] || first[1] !== last[1]) ring.push([...first]);
+    return [[ring]];
+  }
+  return [boundaryFor(origin.radiusMeters / CELL_METERS)];
 }
 
 export function project(lng: number, lat: number, origin: TwinLocation): Pair {
@@ -60,6 +71,22 @@ export function contains(point: Pair, polygons: MultiPolygon) {
 
 export function clip(polygons: MultiPolygon, halfSize = HALF_SIZE): MultiPolygon {
   return polygons.length ? polygonClipping.intersection(polygons, boundaryFor(halfSize)) : [];
+}
+
+function clipToBoundary(polygons: MultiPolygon, boundary: MultiPolygon): MultiPolygon {
+  return polygons.length ? polygonClipping.intersection(polygons, boundary) : [];
+}
+
+function ringArea(ring: Pair[]) {
+  return Math.abs(ring.reduce((sum, point, index) => {
+    const next = ring[(index + 1) % ring.length];
+    return sum + point[0] * next[1] - next[0] * point[1];
+  }, 0)) / 2;
+}
+
+function polygonArea(polygons: MultiPolygon) {
+  return polygons.reduce((total, [outer, ...holes]) =>
+    total + ringArea(outer) - holes.reduce((sum, hole) => sum + ringArea(hole), 0), 0);
 }
 
 export function cellPolygon(row: number, col: number, gridSize = GRID_SIZE): Polygon {
@@ -102,7 +129,7 @@ function roadWidth(tags: Record<string, string>) {
   return tags.highway === "service" ? 0.35 : 0.65;
 }
 
-function roadPolygons(points: Pair[], width: number, halfSize: number): MultiPolygon {
+function roadPolygons(points: Pair[], width: number, boundary: MultiPolygon): MultiPolygon {
   // Metric-width segments, joined by discs, preserve bends and intersection positions.
   const pieces: Polygon[] = [];
   points.forEach((p, i) => {
@@ -115,7 +142,7 @@ function roadPolygons(points: Pair[], width: number, halfSize: number): MultiPol
     const nx = -dz / length * width / 2, nz = dx / length * width / 2;
     pieces.push([[[a[0] + nx, a[1] + nz], [p[0] + nx, p[1] + nz], [p[0] - nx, p[1] - nz], [a[0] - nx, a[1] - nz], [a[0] + nx, a[1] + nz]]]);
   });
-  return pieces.length ? clip(polygonClipping.union(pieces[0], ...pieces.slice(1)), halfSize) : [];
+  return pieces.length ? clipToBoundary(polygonClipping.union(pieces[0], ...pieces.slice(1)), boundary) : [];
 }
 
 export function parseNeighborhood(data: Parameters<typeof osmtogeojson>[0], origin: TwinLocation): Neighborhood {
@@ -125,6 +152,7 @@ export function parseNeighborhood(data: Parameters<typeof osmtogeojson>[0], orig
 export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLocation): Neighborhood {
   const gridSize = gridSizeFor(origin);
   const halfSize = gridSize / 2;
+  const boundary = studyBoundary(origin);
   const features: AreaFeature[] = [];
   const trees: Neighborhood["trees"] = [];
   let roads = 0;
@@ -137,7 +165,7 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
     if (!geometry) continue;
     if (geometry.type === "Point" && tags.natural === "tree") {
       const point = project(geometry.coordinates[0], geometry.coordinates[1], origin);
-      if (point.every((n) => Math.abs(n) <= halfSize)) trees.push({ id, point });
+      if (contains(point, boundary)) trees.push({ id, point });
       continue;
     }
 
@@ -152,10 +180,10 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
     if (geometry.type === "Polygon" || geometry.type === "MultiPolygon") {
       const coordinates = geometry.type === "Polygon" ? [geometry.coordinates] : geometry.coordinates;
       const projected = coordinates.map((polygon) => polygon.map((ring) => ring.map(([lng, lat]) => project(lng, lat, origin))));
-      polygons = clip(projected, halfSize);
+      polygons = clipToBoundary(projected, boundary);
     } else if ((geometry.type === "LineString" || geometry.type === "MultiLineString") && tags.highway) {
       const lines = geometry.type === "LineString" ? [geometry.coordinates] : geometry.coordinates;
-      polygons = lines.flatMap((line) => roadPolygons(line.map(([lng, lat]) => project(lng, lat, origin)), roadWidth(tags), halfSize));
+      polygons = lines.flatMap((line) => roadPolygons(line.map(([lng, lat]) => project(lng, lat, origin)), roadWidth(tags), boundary));
     }
     if (!polygons.length) continue;
     const duplicate = features.find((f) => f.id === id);
@@ -173,9 +201,11 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
     const points = feature.polygons.flat(2);
     return { feature, minX: Math.min(...points.map((p) => p[0])), maxX: Math.max(...points.map((p) => p[0])), minZ: Math.min(...points.map((p) => p[1])), maxZ: Math.max(...points.map((p) => p[1])) };
   });
-  const baseline: EcoCell[] = Array.from({ length: gridSize ** 2 }, (_, index) => {
+  const baseline: EcoCell[] = Array.from({ length: gridSize ** 2 }, (_, index): EcoCell | null => {
     const row = Math.floor(index / gridSize), col = index % gridSize;
     const point: Pair = [col - halfSize + 0.5, row - halfSize + 0.5];
+    const coverage = polygonArea(polygonClipping.intersection(boundary, cellPolygon(row, col, gridSize)));
+    if (coverage <= 1e-6) return null;
     let surfaceType: SurfaceType = "unknown";
     let buildingId: string | undefined;
     for (const feature of features) {
@@ -197,11 +227,11 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
       }
     }
     if (!buildingId && trees.some(({ point: p }) => cellAt(p[0], p[1], gridSize) === `${row}-${col}`)) surfaceType = "tree";
-    return { id: `${row}-${col}`, row, col, surfaceType, baselineSurfaceType: surfaceType, elevation: 0, buildingId, ...calculateCellEnvironment(surfaceType) };
-  });
+    return { id: `${row}-${col}`, row, col, surfaceType, baselineSurfaceType: surfaceType, elevation: 0, coverage, buildingId, ...calculateCellEnvironment(surfaceType) };
+  }).filter((cell): cell is EcoCell => cell !== null);
   const buildings = features.filter((f) => f.surface === "building");
   return {
-    features, trees, baseline, buildings: buildings.length, roads, gridSize,
+    features, trees, baseline, buildings: buildings.length, roads, gridSize, boundary,
     assumedHeights: buildings.filter((f) => f.heightSource !== "tag").length,
     unknownCells: baseline.filter((c) => c.surfaceType === "unknown").length,
   };
@@ -220,7 +250,8 @@ export function neighborhoodQuery(location: TwinLocation) {
 const requests = new Map<string, Promise<Neighborhood>>();
 export function loadNeighborhood(location: TwinLocation): Promise<Neighborhood> {
   const query = neighborhoodQuery(location);
-  const cached = requests.get(query);
+  const cacheKey = `${query}|${JSON.stringify(location.boundary ?? [])}`;
+  const cached = requests.get(cacheKey);
   if (cached) return cached;
   const request = (async () => {
     const { loadVectorNeighborhood } = await import("./vectorSource");
@@ -228,7 +259,7 @@ export function loadNeighborhood(location: TwinLocation): Promise<Neighborhood> 
     if (requests.size > 8) requests.delete(requests.keys().next().value!);
     return neighborhood;
   })();
-  requests.set(query, request);
-  request.catch(() => requests.delete(query));
+  requests.set(cacheKey, request);
+  request.catch(() => requests.delete(cacheKey));
   return request;
 }

@@ -91,6 +91,27 @@ function Tree({ x, z, color, onClick }: { x: number; z: number; color: string; o
   );
 }
 
+function CellSurface({ cell, boundary, gridSize, color, y, inset, onClick }: {
+  cell: EcoCell; boundary: MultiPolygon; gridSize: number; color: string; y: number; inset: boolean;
+  onClick: (event: ThreeEvent<MouseEvent>) => void;
+}) {
+  const polygons = useMemo(
+    () => polygonClipping.intersection(boundary, cellPolygon(cell.row, cell.col, gridSize)),
+    [boundary, cell.col, cell.row, gridSize],
+  );
+  if (cell.coverage > 0.999999) {
+    const size = inset ? 0.985 : 1;
+    const x = cell.col - gridSize / 2 + 0.5, z = cell.row - gridSize / 2 + 0.5;
+    return (
+      <mesh position={[x, y, z]} rotation={[-Math.PI / 2, 0, 0]} onClick={onClick}>
+        <planeGeometry args={[size, size]} />
+        <meshStandardMaterial color={color} />
+      </mesh>
+    );
+  }
+  return <Footprint polygons={polygons} y={y} color={color} onClick={onClick} />;
+}
+
 export type SceneCapture = { capture: () => string };
 function CaptureBridge({ captureRef, viewMode }: { captureRef?: Ref<SceneCapture>; viewMode: ViewMode }) {
   const { gl, scene, camera } = useThree();
@@ -133,7 +154,7 @@ export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neigh
         <color attach="background" args={["#c9d1d7"]} />
         <ambientLight intensity={1.1} />
         <directionalLight position={[-15, 28, 10]} intensity={2.2} />
-        <mesh position={[0, -0.15, 0]}><boxGeometry args={[gridSize + 0.05, 0.25, gridSize + 0.05]} /><meshStandardMaterial color="#aeb4bc" /></mesh>
+        <Footprint polygons={neighborhood.boundary} height={0.25} y={-0.25} color="#aeb4bc" />
         {viewMode === "surface" && neighborhood.features.filter((f) => f.surface !== "building").map((feature, index) => (
           <Footprint key={feature.id} polygons={feature.polygons} y={0.014 + index * 0.00003} color={SURFACE_COLORS[feature.surface]}
             onClick={(e) => clickCell(e, cellAt(e.point.x, e.point.z, gridSize))} />
@@ -144,10 +165,15 @@ export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neigh
           const showSurface = viewMode !== "surface" || (changed && !cell.buildingId);
           return (
             <group key={cell.id}>
-              <mesh position={[x, showSurface ? 0.025 : 0, z]} rotation={[-Math.PI / 2, 0, 0]} onClick={(e) => clickCell(e, cell.id)}>
-                <planeGeometry args={[viewMode === "surface" ? 1 : 0.985, viewMode === "surface" ? 1 : 0.985]} />
-                <meshStandardMaterial color={showSurface ? colorFor(cell, viewMode, rainfallMm) : SURFACE_COLORS.unknown} />
-              </mesh>
+              <CellSurface
+                cell={cell}
+                boundary={neighborhood.boundary}
+                gridSize={gridSize}
+                color={showSurface ? colorFor(cell, viewMode, rainfallMm) : SURFACE_COLORS.unknown}
+                y={showSurface ? 0.025 : 0}
+                inset={viewMode !== "surface"}
+                onClick={(e) => clickCell(e, cell.id)}
+              />
               {selectedCell === cell.id && <mesh userData={{ captureHidden: true }} position={[x, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.37, 0.42, 4]} /><meshBasicMaterial color="#2f6fed" /></mesh>}
               {cell.surfaceType === "tree" && changed && <Tree x={x} z={z} color={colorFor(cell, viewMode, rainfallMm)} onClick={(e) => clickCell(e, cell.id)} />}
             </group>

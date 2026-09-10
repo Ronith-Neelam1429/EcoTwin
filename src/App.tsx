@@ -61,7 +61,7 @@ function App() {
               }
             >
               <EcoTwinView
-                key={`${location.lat}-${location.lng}`}
+                key={`${location.lat}-${location.lng}-${JSON.stringify(location.boundary ?? [])}`}
                 location={location}
               />
             </Suspense>
