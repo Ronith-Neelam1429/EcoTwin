@@ -1,10 +1,11 @@
-import { Droplets, Layers3, ThermometerSun } from "lucide-react";
+import { Droplets, Layers3, SunMedium, ThermometerSun } from "lucide-react";
 import type { ViewMode } from "../lib/ecotwin/types";
 
 const MODES: { value: ViewMode; label: string; icon: typeof Layers3 }[] = [
   { value: "surface", label: "Surface", icon: Layers3 },
-  { value: "heat", label: "Heat", icon: ThermometerSun },
-  { value: "runoff", label: "Runoff", icon: Droplets },
+  { value: "temperature", label: "Cooling", icon: ThermometerSun },
+  { value: "solar", label: "Sun & shade", icon: SunMedium },
+  { value: "stormwater", label: "Stormwater", icon: Droplets },
 ];
 
 export function ViewModeToggle({ value, onChange }: { value: ViewMode; onChange: (mode: ViewMode) => void }) {

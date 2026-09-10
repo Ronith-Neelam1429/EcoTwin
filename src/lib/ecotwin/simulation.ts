@@ -11,6 +11,8 @@ export type CellPhysics = { water: WaterBalance; heat: HeatBalance };
 function environment(p: SurfaceParameters, physics: CellPhysics) {
   return {
     heatAbsorption: 1 - p.albedo,
+    shade: p.canopy * p.shadeEfficiency,
+    absorbedSolar: physics.heat.absorbedSolarWm2,
     infiltration: physics.water.rainfallMm > 0 ? physics.water.infiltrationMm / physics.water.rainfallMm : 0,
     canopy: p.canopy,
     temperature: physics.heat.temperatureC,

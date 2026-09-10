@@ -200,6 +200,7 @@ function LoadedTwin({
           <EcoTwinScene
             captureRef={captureRef}
             cells={currentRun.cells}
+            baselineCells={baselineRun.cells}
             rainfallMm={inputs.rainfallMm}
             viewMode={viewMode}
             selectedTool={selectedTool}

@@ -15,7 +15,7 @@ export type InterventionTool =
   | "permeable_pavement"
   | "erase";
 
-export type ViewMode = "surface" | "heat" | "runoff";
+export type ViewMode = "surface" | "temperature" | "solar" | "stormwater";
 
 export type EcoCell = {
   id: string;
@@ -25,6 +25,10 @@ export type EcoCell = {
   baselineSurfaceType: SurfaceType;
   elevation: number;
   heatAbsorption: number;
+  /** Fraction of incoming sunlight blocked by modeled canopy. */
+  shade: number;
+  /** Shortwave solar energy absorbed by the surface in W/m². */
+  absorbedSolar: number;
   infiltration: number;
   canopy: number;
   /** Event runoff depth in mm, not ponded flood depth. */

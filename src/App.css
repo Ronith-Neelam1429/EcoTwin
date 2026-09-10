@@ -825,6 +825,7 @@ a:focus-visible {
 
 .scene-key,
 .scene-help,
+.cell-impact-card,
 .geography-summary,
 .edit-message,
 .osm-attribution {
@@ -849,6 +850,60 @@ a:focus-visible {
   font-weight: 550;
 }
 
+.cell-impact-card {
+  position: absolute;
+  top: 52px;
+  left: 10px;
+  z-index: 3;
+  width: 222px;
+  padding: 10px;
+  color: #d8dde2;
+  background: rgb(28 33 39 / 94%);
+  border: 1px solid rgb(82 93 104 / 90%);
+  border-radius: 2px;
+  box-shadow: 0 4px 14px rgb(13 17 22 / 18%);
+  backdrop-filter: blur(10px);
+}
+
+.cell-impact-card > span {
+  display: block;
+  color: #8fa0ae;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.cell-impact-card > strong {
+  display: block;
+  margin-top: 3px;
+  color: #f1f4f6;
+  font-size: 12px;
+}
+
+.cell-impact-card dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px 10px;
+  margin: 10px 0 0;
+}
+
+.cell-impact-card dl div {
+  min-width: 0;
+}
+
+.cell-impact-card dt {
+  color: #8fa0ae;
+  font-size: 10px;
+}
+
+.cell-impact-card dd {
+  margin: 2px 0 0;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .unknown-swatch,
 .origin-swatch {
   width: 10px;
@@ -865,19 +920,24 @@ a:focus-visible {
   background: var(--accent);
 }
 
-.scale-heat,
-.scale-runoff {
+.scale-temperature,
+.scale-solar,
+.scale-stormwater {
   width: 64px;
   height: 8px;
   border-radius: 2px;
 }
 
-.scale-heat {
-  background: linear-gradient(90deg, #f5d65b, #e54735);
+.scale-temperature {
+  background: linear-gradient(90deg, #d9dde0, #167d8d);
 }
 
-.scale-runoff {
-  background: linear-gradient(90deg, #dcecff, #1f62aa);
+.scale-solar {
+  background: linear-gradient(90deg, #f1d36b, #173f55);
+}
+
+.scale-stormwater {
+  background: linear-gradient(90deg, #d9dde0, #1466a0);
 }
 
 .scene-help {

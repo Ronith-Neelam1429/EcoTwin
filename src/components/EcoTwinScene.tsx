@@ -3,7 +3,7 @@ import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import polygonClipping, { type MultiPolygon, type Pair } from "polygon-clipping";
-import { SURFACE_COLORS } from "../lib/ecotwin/cellProperties";
+import { SURFACE_COLORS, SURFACE_LABELS } from "../lib/ecotwin/cellProperties";
 import { cellAt, cellPolygon, contains, type Neighborhood, type AreaFeature } from "../lib/ecotwin/geography";
 import type { EcoCell, InterventionTool, TwinLocation, ViewMode } from "../lib/ecotwin/types";
 
@@ -27,9 +27,21 @@ const LANDSCAPE_HEIGHT = 0.018;
 const CURB_HEIGHT = 0.026;
 const CURB_WIDTH = 0.035;
 
-function colorFor(cell: EcoCell, mode: ViewMode, rainfallMm: number) {
-  if (mode === "heat") return new THREE.Color().setHSL(0.14 * (1 - THREE.MathUtils.clamp((cell.temperature - 10) / 50, 0, 1)), 0.78, 0.53).getStyle();
-  if (mode === "runoff") return new THREE.Color().setHSL(0.59, 0.7, 0.85 - THREE.MathUtils.clamp(cell.water / Math.max(1, rainfallMm), 0, 1) * 0.6).getStyle();
+function colorFor(cell: EcoCell, baseline: EcoCell | undefined, mode: ViewMode, rainfallMm: number) {
+  if (mode === "temperature") {
+    const cooling = Math.max(0, (baseline?.temperature ?? cell.temperature) - cell.temperature);
+    return new THREE.Color().lerpColors(new THREE.Color("#d9dde0"), new THREE.Color("#167d8d"), THREE.MathUtils.clamp(cooling / 12, 0, 1)).getStyle();
+  }
+  if (mode === "solar") {
+    const baselineSolar = baseline?.absorbedSolar ?? cell.absorbedSolar;
+    const solarReduction = Math.max(0, baselineSolar - cell.absorbedSolar);
+    const effect = Math.max(cell.shade, solarReduction / Math.max(1, baselineSolar));
+    return new THREE.Color().lerpColors(new THREE.Color("#f1d36b"), new THREE.Color("#173f55"), THREE.MathUtils.clamp(effect, 0, 1)).getStyle();
+  }
+  if (mode === "stormwater") {
+    const avoided = Math.max(0, (baseline?.water ?? cell.water) - cell.water);
+    return new THREE.Color().lerpColors(new THREE.Color("#d9dde0"), new THREE.Color("#1466a0"), THREE.MathUtils.clamp(avoided / Math.max(1, rainfallMm), 0, 1)).getStyle();
+  }
   return SURFACE_COLORS[cell.surfaceType];
 }
 
@@ -123,8 +135,8 @@ function Curbs({ features, boundary }: { features: AreaFeature[]; boundary: Mult
   );
 }
 
-function Building({ feature, cells, gridSize, mode, tool, onSelect, rainfallMm }: {
-  rainfallMm: number; feature: AreaFeature; cells: EcoCell[]; gridSize: number; mode: ViewMode; tool: InterventionTool; onSelect: (id: string) => void;
+function Building({ feature, cells, baselineById, gridSize, mode, tool, onSelect, rainfallMm }: {
+  rainfallMm: number; feature: AreaFeature; cells: EcoCell[]; baselineById: Map<string, EcoCell>; gridSize: number; mode: ViewMode; tool: InterventionTool; onSelect: (id: string) => void;
 }) {
   const displayHeight = feature.height + Math.min(
     feature.height * (BUILDING_HEIGHT_SCALE - 1),
@@ -154,7 +166,7 @@ function Building({ feature, cells, gridSize, mode, tool, onSelect, rainfallMm }
     <group>
       <Footprint polygons={feature.polygons} height={displayHeight} color={"#c5c9cf"} roughness={0.78} onClick={click} />
       {roofs.filter((r) => r.polygons.length).map(({ cell, polygons }) => (
-        <Footprint key={cell.id} polygons={polygons} y={displayHeight + 0.035} color={colorFor(cell, mode, rainfallMm)} onClick={click} />
+        <Footprint key={cell.id} polygons={polygons} y={displayHeight + 0.035} color={colorFor(cell, baselineById.get(cell.id), mode, rainfallMm)} onClick={click} />
       ))}
     </group>
   );
@@ -212,11 +224,14 @@ function CaptureBridge({ captureRef, viewMode }: { captureRef?: Ref<SceneCapture
   return null;
 }
 
-export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neighborhood, location, rainfallMm, captureRef }: {
-  captureRef?: Ref<SceneCapture>; rainfallMm: number; cells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: Neighborhood; location: TwinLocation;
+export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onCellClick, neighborhood, location, rainfallMm, captureRef }: {
+  captureRef?: Ref<SceneCapture>; rainfallMm: number; cells: EcoCell[]; baselineCells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: Neighborhood; location: TwinLocation;
 }) {
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const gridSize = neighborhood.gridSize;
+  const baselineById = useMemo(() => new Map(baselineCells.map((cell) => [cell.id, cell])), [baselineCells]);
+  const selectedResult = selectedCell ? cells.find((cell) => cell.id === selectedCell) : undefined;
+  const selectedBaseline = selectedCell ? baselineById.get(selectedCell) : undefined;
   const halfSize = gridSize / 2;
   const heading = location.heading * Math.PI / 180;
   const cameraPosition: [number, number, number] = [-Math.sin(heading) * gridSize, gridSize + 1, Math.cos(heading) * gridSize];
@@ -257,21 +272,21 @@ export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neigh
                 cell={cell}
                 boundary={neighborhood.boundary}
                 gridSize={gridSize}
-                color={showSurface ? colorFor(cell, viewMode, rainfallMm) : SURFACE_COLORS.unknown}
+                color={showSurface ? colorFor(cell, baselineById.get(cell.id), viewMode, rainfallMm) : SURFACE_COLORS.unknown}
                 y={showSurface ? EDITED_SURFACE_Y : CELL_SURFACE_Y}
                 inset={viewMode !== "surface"}
                 onClick={(e) => clickCell(e, cell.id)}
               />
               {selectedCell === cell.id && <mesh userData={{ captureHidden: true }} position={[x, 0.04, z]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.37, 0.42, 4]} /><meshBasicMaterial color="#2f6fed" /></mesh>}
-              {cell.surfaceType === "tree" && changed && <Tree x={x} z={z} color={colorFor(cell, viewMode, rainfallMm)} onClick={(e) => clickCell(e, cell.id)} />}
+              {cell.surfaceType === "tree" && changed && <Tree x={x} z={z} color={colorFor(cell, baselineById.get(cell.id), viewMode, rainfallMm)} onClick={(e) => clickCell(e, cell.id)} />}
             </group>
           );
         })}
         {neighborhood.features.filter((f) => f.surface === "building").map((feature) => (
-          <Building key={feature.id} feature={feature} cells={cells} gridSize={gridSize} mode={viewMode} tool={selectedTool} onSelect={select} rainfallMm={rainfallMm} />
+          <Building key={feature.id} feature={feature} cells={cells} baselineById={baselineById} gridSize={gridSize} mode={viewMode} tool={selectedTool} onSelect={select} rainfallMm={rainfallMm} />
         ))}
         {neighborhood.trees.filter((t) => cells.find((c) => c.id === cellAt(...t.point, gridSize))?.surfaceType === "tree").map((tree) => (
-          <Tree key={tree.id} x={tree.point[0]} z={tree.point[1]} color={colorFor(cells.find((c) => c.id === cellAt(...tree.point, gridSize))!, viewMode, rainfallMm)} onClick={(e) => clickCell(e, cellAt(...tree.point, gridSize))} />
+          <Tree key={tree.id} x={tree.point[0]} z={tree.point[1]} color={colorFor(cells.find((c) => c.id === cellAt(...tree.point, gridSize))!, baselineById.get(cellAt(...tree.point, gridSize)), viewMode, rainfallMm)} onClick={(e) => clickCell(e, cellAt(...tree.point, gridSize))} />
         ))}
         <mesh userData={{ captureHidden: true }} position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.19, 0.27, 32]} /><meshBasicMaterial color="#2f6fed" /></mesh>
         <Html position={[0, 0.4, -halfSize - 0.8]} center><span className="north-label">↑ N</span></Html>
@@ -279,8 +294,24 @@ export function EcoTwinScene({ cells, viewMode, selectedTool, onCellClick, neigh
       </Canvas>
       <div className="scene-key">
         {viewMode === "surface" ? <><span className="unknown-swatch" />Unmapped ground · <span className="origin-swatch" />Selected location</>
-          : <><span className={`scale-${viewMode}`} />{viewMode === "heat" ? "10°C → 60°C surface (ends clipped)" : `0 → ${Math.max(1, rainfallMm).toFixed(1)} mm runoff / cell`}</>}
+          : <><span className={`scale-${viewMode}`} />{
+            viewMode === "temperature" ? "No change → 12°C cooler vs baseline"
+              : viewMode === "solar" ? "Sun exposed → shaded / less solar absorbed"
+                : `No change → ${Math.max(1, rainfallMm).toFixed(1)} mm runoff avoided`
+          }</>}
       </div>
+      {viewMode !== "surface" && selectedResult && selectedBaseline && (
+        <div className="cell-impact-card" aria-live="polite">
+          <span>{SURFACE_LABELS[selectedResult.surfaceType]}</span>
+          <strong>{selectedResult.surfaceType === selectedBaseline.surfaceType ? "No intervention in this cell" : "Change in selected cell"}</strong>
+          <dl>
+            <div><dt>Cooling</dt><dd>{Math.max(0, selectedBaseline.temperature - selectedResult.temperature).toFixed(1)}°C</dd></div>
+            <div><dt>Solar absorbed</dt><dd>{Math.round(selectedResult.absorbedSolar - selectedBaseline.absorbedSolar)} W/m²</dd></div>
+            <div><dt>Canopy shade</dt><dd>{Math.round(selectedResult.shade * 100)}%</dd></div>
+            <div><dt>Runoff avoided</dt><dd>{Math.max(0, selectedBaseline.water - selectedResult.water).toFixed(1)} mm</dd></div>
+          </dl>
+        </div>
+      )}
       <div className="scene-help">Drag to orbit · Scroll to zoom · Right-drag to pan · 1 cell = 10m</div>
       <div className="osm-attribution"><a href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a> · <a href="https://openmaptiles.org/" target="_blank" rel="noreferrer">© OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a></div>
     </div>
