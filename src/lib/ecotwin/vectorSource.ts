@@ -36,7 +36,24 @@ export function tileTags(layer: string, properties: Record<string, unknown>): Re
   }
   if (layer === "transportation") {
     if (["rail", "aerialway", "ferry"].includes(kind) || properties.brunnel === "tunnel") return null;
-    return { highway: String(properties.subclass ?? kind), width: String(properties.width ?? ""), lanes: String(properties.lanes ?? "") };
+    const highway = subclass || kind;
+    return {
+      highway,
+      class: kind,
+      width: String(properties.width ?? ""),
+      lanes: String(properties.lanes ?? ""),
+      "lanes:forward": String(properties["lanes:forward"] ?? ""),
+      "lanes:backward": String(properties["lanes:backward"] ?? ""),
+      service: String(properties.service ?? ""),
+      oneway: String(properties.oneway ?? ""),
+      shoulder: String(properties.shoulder ?? ""),
+      "shoulder:left": String(properties["shoulder:left"] ?? ""),
+      "shoulder:right": String(properties["shoulder:right"] ?? ""),
+      parking: String(properties.parking ?? ""),
+      "parking:lane:both": String(properties["parking:lane:both"] ?? ""),
+      "parking:lane:left": String(properties["parking:lane:left"] ?? ""),
+      "parking:lane:right": String(properties["parking:lane:right"] ?? ""),
+    };
   }
   if (layer === "landcover" || layer === "landuse" || layer === "park") {
     if (kind === "tree" || subclass === "tree") return { natural: "tree" };

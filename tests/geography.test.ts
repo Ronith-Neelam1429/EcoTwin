@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildingHeight, cellAt, clip, contains, neighborhoodQuery, parseMeters, parseNeighborhood, project, studyBoundary } from "../src/lib/ecotwin/geography";
+import { buildingHeight, cellAt, clip, contains, neighborhoodQuery, parseMeters, parseNeighborhood, project, roadWidthMeters, studyBoundary } from "../src/lib/ecotwin/geography";
 import { applyIntervention } from "../src/lib/ecotwin/applyIntervention";
 import { tileTags } from "../src/lib/ecotwin/vectorSource";
 import { calculateMetrics } from "../src/lib/ecotwin/simulation";
@@ -49,6 +49,30 @@ test("height precedence and units are explicit", () => {
   assert.deepEqual(buildingHeight({ height: "12", "building:levels": "2" }), { height: 1.2, heightSource: "tag" });
   assert.deepEqual(buildingHeight({ "building:levels": "2" }), { height: 0.6, heightSource: "levels" });
   assert.deepEqual(buildingHeight({}), { height: 0.6, heightSource: "assumed" });
+});
+
+test("road widths prefer mapped measurements, then lanes, class, and service type", () => {
+  assert.equal(roadWidthMeters({ highway: "primary", width: "30 ft", lanes: "2" }), 9.144);
+  assert.equal(roadWidthMeters({ highway: "residential", lanes: "2" }), 6.8);
+  assert.equal(roadWidthMeters({ highway: "motorway", "lanes:forward": "3", "lanes:backward": "3" }), 24);
+  assert.equal(roadWidthMeters({ highway: "motorway", oneway: "1" }), 11.5);
+  assert.equal(roadWidthMeters({ highway: "service", service: "driveway" }), 3.5);
+  assert.equal(roadWidthMeters({ highway: "service", service: "parking_aisle" }), 5.5);
+  assert.equal(roadWidthMeters({ highway: "service", service: "parking_aisle", oneway: "yes" }), 3.5);
+  assert.equal(roadWidthMeters({ highway: "residential", lanes: "2", "parking:lane:left": "no" }), 6.8);
+  assert.equal(roadWidthMeters({ highway: "footway" }), 1.8);
+  assert.equal(roadWidthMeters({ highway: "primary" }), 11);
+});
+
+test("vector road tags retain width-relevant attributes", () => {
+  assert.deepEqual(tileTags("transportation", {
+    class: "service", subclass: "service", service: "parking_aisle", lanes: 1, width: 5.5,
+  }), {
+    highway: "service", class: "service", width: "5.5", lanes: "1",
+    "lanes:forward": "", "lanes:backward": "", service: "parking_aisle", oneway: "",
+    shoulder: "", "shoulder:left": "", "shoulder:right": "", parking: "",
+    "parking:lane:both": "", "parking:lane:left": "", "parking:lane:right": "",
+  });
 });
 
 test("mapped geometry builds a site baseline without fake buildings or terrain", () => {

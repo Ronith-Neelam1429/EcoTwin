@@ -120,20 +120,102 @@ export function buildingHeight(tags: Record<string, string>) {
   return { height: 0.6, heightSource: "assumed" as const };
 }
 
-function roadWidth(tags: Record<string, string>) {
+const DEFAULT_ROAD_WIDTH_METERS: Record<string, number> = {
+  motorway: 22,
+  motorway_link: 7.5,
+  trunk: 15,
+  trunk_link: 7,
+  primary: 11,
+  primary_link: 7,
+  secondary: 9,
+  secondary_link: 6.5,
+  tertiary: 7.5,
+  tertiary_link: 6,
+  residential: 6.5,
+  living_street: 5.5,
+  minor: 6,
+  unclassified: 5.5,
+  road: 6,
+  busway: 7,
+  service: 4.5,
+  pedestrian: 4,
+  track: 3.5,
+  cycleway: 2.5,
+  bridleway: 2,
+  footway: 1.8,
+  steps: 1.8,
+  path: 1.5,
+  corridor: 1.5,
+  raceway: 10,
+};
+
+const SERVICE_ROAD_WIDTH_METERS: Record<string, number> = {
+  parking_aisle: 5.5,
+  alley: 4,
+  driveway: 3.5,
+  drive_through: 3.5,
+  emergency_access: 4,
+};
+
+const ONEWAY_ROAD_WIDTH_METERS: Record<string, number> = {
+  motorway: 11.5,
+  trunk: 9,
+  primary: 7,
+  secondary: 6.5,
+  tertiary: 5.5,
+  residential: 4.5,
+  living_street: 4.5,
+  unclassified: 4.5,
+  minor: 4.5,
+  road: 4.5,
+  service: 3.5,
+};
+
+function count(value: string | undefined) {
+  if (!value?.trim()) return;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 && parsed < 20 ? parsed : undefined;
+}
+
+/** Returns the estimated paved width; tagged measurements always take priority. */
+export function roadWidthMeters(tags: Record<string, string>) {
   const width = parseMeters(tags.width);
-  if (width) return width / CELL_METERS;
-  if (/^(footway|path|steps|cycleway|pedestrian)$/.test(tags.highway)) return 0.22;
-  const lanes = Number(tags.lanes);
-  if (lanes > 0 && lanes < 12) return lanes * 3.2 / CELL_METERS;
-  return tags.highway === "service" ? 0.35 : 0.65;
+  if (width) return width;
+
+  const highway = tags.highway || tags.class || "road";
+  const forward = count(tags["lanes:forward"]), backward = count(tags["lanes:backward"]);
+  const lanes = count(tags.lanes) ?? (forward || backward ? (forward ?? 0) + (backward ?? 0) : undefined);
+  if (lanes) {
+    const laneWidth = /^(motorway|trunk)/.test(highway) ? 3.6 : /^(primary|secondary)/.test(highway) ? 3.4 : 3.2;
+    let estimated = lanes * laneWidth + (/^(motorway|trunk)/.test(highway) ? 2.4 : 0.4);
+    const hasParkingLane = (value: string | undefined) => Boolean(value && !/^(no|none|separate)$/i.test(value));
+    const parking = [tags.parking, tags["parking:lane:both"], tags["parking:lane:left"], tags["parking:lane:right"]];
+    if (parking[0] === "both" || hasParkingLane(parking[1])) estimated += 4.4;
+    else estimated += parking.slice(2).filter(hasParkingLane).length * 2.2;
+    if (tags.shoulder === "both") estimated += 2.4;
+    else if (tags.shoulder === "yes") estimated += 1.2;
+    else estimated += [tags["shoulder:left"], tags["shoulder:right"]].filter((value) => value === "yes").length * 1.2;
+    return Math.round(estimated * 100) / 100;
+  }
+
+  const oneWay = /^(yes|true|1|-1)$/i.test(tags.oneway ?? "");
+  if (highway === "service" && tags.service) {
+    const serviceWidth = SERVICE_ROAD_WIDTH_METERS[tags.service] ?? DEFAULT_ROAD_WIDTH_METERS.service;
+    return oneWay ? Math.min(serviceWidth, ONEWAY_ROAD_WIDTH_METERS.service) : serviceWidth;
+  }
+  if (oneWay && ONEWAY_ROAD_WIDTH_METERS[highway]) return ONEWAY_ROAD_WIDTH_METERS[highway];
+  return DEFAULT_ROAD_WIDTH_METERS[highway] ?? DEFAULT_ROAD_WIDTH_METERS.road;
+}
+
+function roadWidth(tags: Record<string, string>) {
+  return roadWidthMeters(tags) / CELL_METERS;
 }
 
 function roadPolygons(points: Pair[], width: number, boundary: MultiPolygon): MultiPolygon {
   // Metric-width segments, joined by discs, preserve bends and intersection positions.
   const pieces: Polygon[] = [];
   points.forEach((p, i) => {
-    const ring = Array.from({ length: 13 }, (_, j): Pair => [p[0] + Math.cos(j * Math.PI / 6) * width / 2, p[1] + Math.sin(j * Math.PI / 6) * width / 2]);
+    const ring = Array.from({ length: 17 }, (_, j): Pair => [p[0] + Math.cos(j * Math.PI / 8) * width / 2, p[1] + Math.sin(j * Math.PI / 8) * width / 2]);
     pieces.push([ring]);
     if (!i) return;
     const a = points[i - 1], dx = p[0] - a[0], dz = p[1] - a[1];
