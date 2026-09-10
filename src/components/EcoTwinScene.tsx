@@ -1,4 +1,4 @@
-import { useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -27,10 +27,52 @@ const LANDSCAPE_HEIGHT = 0.018;
 const CURB_HEIGHT = 0.026;
 const CURB_WIDTH = 0.035;
 
+const THERMAL_COLORS = ["#3642b9", "#168fd1", "#35c7b2", "#f3d65b", "#f58a36", "#d53645", "#811b55"];
+function thermalColor(temperature: number) {
+  const position = THREE.MathUtils.clamp((temperature - 10) / 50, 0, 1) * (THERMAL_COLORS.length - 1);
+  const index = Math.min(Math.floor(position), THERMAL_COLORS.length - 2);
+  return new THREE.Color(THERMAL_COLORS[index]).lerp(new THREE.Color(THERMAL_COLORS[index + 1]), position - index);
+}
+
+// Linear texture filtering interpolates between 10 m samples for display only.
+// The boundary geometry clips the field; metrics still use the original samples.
+function ThermalField({ cells, boundary, gridSize, onClick }: {
+  cells: EcoCell[]; boundary: MultiPolygon; gridSize: number; onClick: (event: ThreeEvent<MouseEvent>) => void;
+}) {
+  const geometry = useMemo(() => {
+    const result = new THREE.ShapeGeometry(shapesFrom(boundary));
+    const positions = result.getAttribute("position");
+    const uv = result.getAttribute("uv");
+    for (let i = 0; i < positions.count; i++) {
+      uv.setXY(i, positions.getX(i) / gridSize + 0.5, -positions.getY(i) / gridSize + 0.5);
+    }
+    return result;
+  }, [boundary, gridSize]);
+  const texture = useMemo(() => {
+    const data = new Uint8Array(gridSize * gridSize * 4);
+    const fallback = cells.length ? cells.reduce((sum, cell) => sum + cell.temperature, 0) / cells.length : 30;
+    const samples = new Map(cells.map((cell) => [cell.row * gridSize + cell.col, cell.temperature]));
+    for (let i = 0; i < gridSize * gridSize; i++) {
+      const color = thermalColor(samples.get(i) ?? fallback).convertLinearToSRGB();
+      data.set([Math.round(color.r * 255), Math.round(color.g * 255), Math.round(color.b * 255), 255], i * 4);
+    }
+    const result = new THREE.DataTexture(data, gridSize, gridSize);
+    result.colorSpace = THREE.SRGBColorSpace;
+    result.magFilter = THREE.LinearFilter;
+    result.minFilter = THREE.LinearFilter;
+    result.needsUpdate = true;
+    return result;
+  }, [cells, gridSize]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return <mesh geometry={geometry} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.032, 0]} onClick={onClick}>
+    <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} />
+  </mesh>;
+}
+
 function colorFor(cell: EcoCell, baseline: EcoCell | undefined, mode: ViewMode, rainfallMm: number) {
   if (mode === "temperature") {
-    const cooling = Math.max(0, (baseline?.temperature ?? cell.temperature) - cell.temperature);
-    return new THREE.Color().lerpColors(new THREE.Color("#d9dde0"), new THREE.Color("#167d8d"), THREE.MathUtils.clamp(cooling / 12, 0, 1)).getStyle();
+    return thermalColor(cell.temperature).getStyle();
   }
   if (mode === "solar") {
     const baselineSolar = baseline?.absorbedSolar ?? cell.absorbedSolar;
@@ -54,9 +96,9 @@ function shapesFrom(polygons: MultiPolygon) {
   });
 }
 
-function Footprint({ polygons, height = 0, y = 0.03, color, roughness = 0.9, onClick }: {
+function Footprint({ polygons, height = 0, y = 0.03, color, roughness = 0.9, unlit = false, onClick }: {
   polygons: MultiPolygon; height?: number; y?: number; color: string; roughness?: number;
-  onClick?: (event: ThreeEvent<MouseEvent>) => void;
+  unlit?: boolean; onClick?: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const shapes = useMemo(() => shapesFrom(polygons), [polygons]);
   return (
@@ -64,7 +106,7 @@ function Footprint({ polygons, height = 0, y = 0.03, color, roughness = 0.9, onC
       {height > 0
         ? <extrudeGeometry args={[shapes, { depth: height, bevelEnabled: false }]} />
         : <shapeGeometry args={[shapes]} />}
-      <meshStandardMaterial color={color} roughness={roughness} side={THREE.DoubleSide} />
+      {unlit ? <meshBasicMaterial color={color} toneMapped={false} side={THREE.DoubleSide} /> : <meshStandardMaterial color={color} roughness={roughness} side={THREE.DoubleSide} />}
     </mesh>
   );
 }
@@ -147,7 +189,7 @@ function Building({ feature, cells, baselineById, gridSize, mode, tool, onSelect
   function click(event: ThreeEvent<MouseEvent>) {
     event.stopPropagation();
     if (event.delta > 4) return;
-    if (tool !== "green_roof" && tool !== "erase") {
+    if (mode === "surface" && tool !== "green_roof" && tool !== "erase") {
       const groundPoint = event.ray.intersectPlane(
         GROUND_PLANE,
         new THREE.Vector3(),
@@ -166,7 +208,7 @@ function Building({ feature, cells, baselineById, gridSize, mode, tool, onSelect
     <group>
       <Footprint polygons={feature.polygons} height={displayHeight} color={"#c5c9cf"} roughness={0.78} onClick={click} />
       {roofs.filter((r) => r.polygons.length).map(({ cell, polygons }) => (
-        <Footprint key={cell.id} polygons={polygons} y={displayHeight + 0.035} color={colorFor(cell, baselineById.get(cell.id), mode, rainfallMm)} onClick={click} />
+        <Footprint key={cell.id} polygons={polygons} y={displayHeight + 0.035} unlit={mode !== "surface"} color={colorFor(cell, baselineById.get(cell.id), mode, rainfallMm)} onClick={click} />
       ))}
     </group>
   );
@@ -235,7 +277,7 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
   const halfSize = gridSize / 2;
   const heading = location.heading * Math.PI / 180;
   const cameraPosition: [number, number, number] = [-Math.sin(heading) * gridSize, gridSize + 1, Math.cos(heading) * gridSize];
-  function select(id: string) { setSelectedCell(id); onCellClick(id); }
+  function select(id: string) { setSelectedCell(id); if (viewMode === "surface") onCellClick(id); }
   function clickCell(event: ThreeEvent<MouseEvent>, id: string) {
     event.stopPropagation();
     if (event.delta <= 4) select(id);
@@ -262,6 +304,8 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
             onClick={(e) => clickCell(e, cellAt(e.point.x, e.point.z, gridSize))} />
         ))}
         {viewMode === "surface" && <Curbs features={neighborhood.features} boundary={neighborhood.boundary} />}
+        {viewMode === "temperature" && <ThermalField cells={cells} boundary={neighborhood.boundary} gridSize={gridSize}
+          onClick={(event) => clickCell(event, cellAt(event.point.x, event.point.z, gridSize))} />}
         {cells.map((cell) => {
           const x = cell.col - halfSize + 0.5, z = cell.row - halfSize + 0.5;
           const changed = cell.surfaceType !== cell.baselineSurfaceType;
@@ -292,27 +336,30 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
         <Html position={[0, 0.4, -halfSize - 0.8]} center><span className="north-label">↑ N</span></Html>
         <OrbitControls makeDefault enableDamping minDistance={Math.max(3, gridSize / 6)} maxDistance={gridSize * 2.5} maxPolarAngle={Math.PI / 2.1} />
       </Canvas>
-      <div className="scene-key">
+      <div className={viewMode === "surface" ? "scene-key" : "layer-legend"}>
         {viewMode === "surface" ? <><span className="unknown-swatch" />Unmapped ground · <span className="origin-swatch" />Selected location</>
-          : <><span className={`scale-${viewMode}`} />{
-            viewMode === "temperature" ? "No change → 12°C cooler vs baseline"
-              : viewMode === "solar" ? "Sun exposed → shaded / less solar absorbed"
-                : `No change → ${Math.max(1, rainfallMm).toFixed(1)} mm runoff avoided`
-          }</>}
+          : <>
+            <div className="layer-legend-heading"><strong>{viewMode === "temperature" ? "Surface temperature" : viewMode === "solar" ? "Sunlight & canopy" : "Runoff reduction"}</strong><span>MODELED</span></div>
+            <p>{viewMode === "temperature" ? "Explore warmer surfaces and cooler planting areas." : viewMode === "solar" ? "Darker areas indicate shade or less absorbed sunlight." : "Deeper blue shows more rain kept out of runoff."}</p>
+            <div className={`layer-gradient scale-${viewMode}`} />
+            <div className="layer-ticks">{(viewMode === "temperature" ? ["10°", "20°", "30°", "40°", "50°", "60°C"] : viewMode === "solar" ? ["Exposed", "Reduced", "Sheltered"] : ["0", `${(Math.max(1, rainfallMm) / 2).toFixed(1)}`, `${Math.max(1, rainfallMm).toFixed(1)} mm`]).map((label) => <span key={label}>{label}</span>)}</div>
+            <small>{viewMode === "temperature" ? "Smooth display · 10 m samples · scale clipped at ends" : viewMode === "solar" ? "Cell-average effect · sunlight, not UV" : rainfallMm === 0 ? "No rain in this scenario. Adjust Rain & soil to test a storm." : "Compared with baseline · event totals"}</small>
+          </>}
       </div>
       {viewMode !== "surface" && selectedResult && selectedBaseline && (
         <div className="cell-impact-card" aria-live="polite">
           <span>{SURFACE_LABELS[selectedResult.surfaceType]}</span>
-          <strong>{selectedResult.surfaceType === selectedBaseline.surfaceType ? "No intervention in this cell" : "Change in selected cell"}</strong>
+          <strong className="cell-primary-value">{viewMode === "temperature" ? `${selectedResult.temperature.toFixed(1)}°C` : viewMode === "solar" ? `${Math.round(selectedResult.absorbedSolar)} W/m²` : `${selectedResult.water.toFixed(1)} mm`}</strong>
+          <p className="cell-primary-label">{viewMode === "temperature" ? "Surface temperature" : viewMode === "solar" ? "Absorbed sunlight" : "Event runoff"}</p>
           <dl>
-            <div><dt>Cooling</dt><dd>{Math.max(0, selectedBaseline.temperature - selectedResult.temperature).toFixed(1)}°C</dd></div>
+            <div><dt>Temperature change</dt><dd>{(selectedResult.temperature - selectedBaseline.temperature).toFixed(1)}°C</dd></div>
             <div><dt>Solar absorbed</dt><dd>{Math.round(selectedResult.absorbedSolar - selectedBaseline.absorbedSolar)} W/m²</dd></div>
             <div><dt>Canopy shade</dt><dd>{Math.round(selectedResult.shade * 100)}%</dd></div>
-            <div><dt>Runoff avoided</dt><dd>{Math.max(0, selectedBaseline.water - selectedResult.water).toFixed(1)} mm</dd></div>
+            <div><dt>Runoff change</dt><dd>{(selectedResult.water - selectedBaseline.water).toFixed(1)} mm</dd></div>
           </dl>
         </div>
       )}
-      <div className="scene-help">Drag to orbit · Scroll to zoom · Right-drag to pan · 1 cell = 10m</div>
+      <div className="scene-help">{viewMode === "surface" ? "Click to place" : "Click to inspect"} · Drag to orbit · Scroll to zoom</div>
       <div className="osm-attribution"><a href="https://openfreemap.org/" target="_blank" rel="noreferrer">OpenFreeMap</a> · <a href="https://openmaptiles.org/" target="_blank" rel="noreferrer">© OpenMapTiles</a> · <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a></div>
     </div>
   );

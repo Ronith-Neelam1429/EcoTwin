@@ -929,7 +929,7 @@ a:focus-visible {
 }
 
 .scale-temperature {
-  background: linear-gradient(90deg, #d9dde0, #167d8d);
+  background: linear-gradient(90deg, #3642b9, #168fd1, #35c7b2, #f3d65b, #f58a36, #d53645, #811b55);
 }
 
 .scale-solar {
@@ -939,6 +939,28 @@ a:focus-visible {
 .scale-stormwater {
   background: linear-gradient(90deg, #d9dde0, #1466a0);
 }
+
+.layer-legend {
+  position: absolute;
+  z-index: 3;
+  bottom: 74px;
+  left: 16px;
+  width: min(340px, calc(100% - 32px));
+  padding: 16px;
+  color: #ecf2f7;
+  background: rgb(20 27 36 / 95%);
+  border: 1px solid #435365;
+  border-radius: 12px;
+  box-shadow: 0 12px 32px rgb(8 14 22 / 25%);
+  backdrop-filter: blur(16px);
+}
+.layer-legend-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.layer-legend-heading strong { font-size: 15px; font-weight: 650; }
+.layer-legend-heading > span { color: #b2c3d3; font-size: 10px; letter-spacing: .09em; padding: 4px 6px; border: 1px solid #405062; border-radius: 4px; }
+.layer-legend p { color: #acbdce; font-size: 13px; line-height: 1.5; margin: 8px 0 14px; }
+.layer-legend .layer-gradient { width: 100%; height: 12px; border-radius: 6px; box-shadow: inset 0 0 0 1px rgb(255 255 255 / 12%); }
+.layer-ticks { display: flex; justify-content: space-between; color: #e1eaf3; font-size: 12px; font-variant-numeric: tabular-nums; margin: 7px 0 12px; }
+.layer-legend small { display: block; color: #9caec0; font-size: 12px; line-height: 1.5; border-top: 1px solid #354354; padding-top: 10px; }
 
 .scene-help {
   bottom: 13px;
@@ -1197,6 +1219,25 @@ a:focus-visible {
   .geography-summary {
     max-width: 240px;
   }
+}
+
+/* Analysis controls and inspection cards share the map's instrument styling. */
+.twin-view-actions .view-mode-toggle { gap: 3px; padding: 4px; border-radius: 8px; }
+.twin-view-actions .view-mode-toggle button { min-height: 36px; border-radius: 5px; font-size: 13px; }
+.twin-view-actions .view-mode-toggle button.is-active { color: #fff; background: #355472; box-shadow: inset 0 0 0 1px #52779b; }
+.cell-impact-card { top: 52px; left: 16px; width: 250px; max-width: calc(100% - 32px); padding: 16px; border-radius: 12px; background: rgb(20 27 36 / 95%); border-color: #435365; }
+.cell-impact-card > span { font-size: 12px; color: #acbdce; }
+.cell-impact-card > .cell-primary-value { font-size: 30px; font-weight: 600; letter-spacing: -.04em; margin-top: 8px; }
+.cell-primary-label { font-size: 13px; color: #a9bdcf; margin: 2px 0 14px; }
+.cell-impact-card dl { padding-top: 12px; border-top: 1px solid #354354; gap: 12px; }
+.cell-impact-card dt { font-size: 12px; color: #a9bdcf; }
+.cell-impact-card dd { font-size: 14px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+@media (max-height: 720px) {
+  .cell-impact-card { width: 210px; padding: 10px; }
+  .cell-impact-card dl { gap: 6px; }
+  .layer-legend { padding: 12px; bottom: 65px; }
+  .layer-legend p { display: none; }
+  .layer-legend .layer-gradient { margin-top: 12px; }
 }
 
 @media (max-width: 760px) {
