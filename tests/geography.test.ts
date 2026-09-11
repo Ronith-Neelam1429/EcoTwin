@@ -15,6 +15,11 @@ const house = {
   geometry: [point(0, 0), point(20, 0), point(20, 20), point(0, 20), point(0, 0)],
 };
 const road = { type: "way", id: 2, nodes: [5, 6, 7], tags: { highway: "residential", width: "6" }, geometry: [point(-100, -50), point(0, -50), point(100, -80)] };
+const turningCircle = { type: "node", id: 8, ...point(0, 40), tags: { highway: "turning_circle", diameter: "20" } };
+const parkingLot = {
+  type: "way", id: 9, nodes: [9, 10, 11, 12, 9], tags: { amenity: "parking" },
+  geometry: [point(-30, 20), point(30, 20), point(30, 60), point(-30, 60), point(-30, 20)],
+};
 
 test("metric projection preserves east, north, distance, and exact origin", () => {
   assert.deepEqual(project(0, 0, origin), [0, -0]);
@@ -84,6 +89,18 @@ test("mapped geometry builds a site baseline without fake buildings or terrain",
   assert.ok(n.baseline.every((c) => c.elevation === 0));
   assert.ok(n.baseline.some((c) => c.buildingId === "way/1"));
   assert.equal(n.features.find((f) => f.id === "way/1")?.height, 0.9);
+  assert.equal(n.features.find((f) => f.id === "way/1")?.kind, "building");
+  assert.equal(n.features.find((f) => f.id === "way/2")?.kind, "road");
+});
+
+test("area categorizer retains parking lots and gives turning circles their mapped diameter", () => {
+  const n = parseNeighborhood({ elements: [parkingLot, turningCircle] }, origin);
+  assert.equal(n.parkingLots, 1);
+  assert.equal(n.culDeSacs, 1);
+  assert.equal(n.features.find((feature) => feature.id === "way/9")?.kind, "parking_lot");
+  const circle = n.features.find((feature) => feature.id === "node/8")!;
+  const xs = circle.polygons.flat(2).map(([x]) => x);
+  assert.ok(Math.abs(Math.max(...xs) - Math.min(...xs) - 2) < 1e-8);
 });
 
 test("empty coverage is explicitly unknown, not synthetic terrain", () => {
@@ -141,4 +158,6 @@ test("query rejects invalid positions and requests complete geometry", () => {
   assert.throws(() => neighborhoodQuery({ ...origin, lat: NaN }));
   assert.throws(() => neighborhoodQuery({ ...origin, lng: 200 }));
   assert.match(neighborhoodQuery(origin), /out geom;/);
+  assert.match(neighborhoodQuery(origin), /parking_space/);
+  assert.match(neighborhoodQuery(origin), /turning_circle/);
 });

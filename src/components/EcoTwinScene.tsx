@@ -1,18 +1,12 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
 import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
-import { Html, OrbitControls } from "@react-three/drei";
+import { Html, Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
 import polygonClipping, { type MultiPolygon, type Pair } from "polygon-clipping";
 import { SURFACE_COLORS, SURFACE_LABELS } from "../lib/ecotwin/cellProperties";
 import { cellAt, cellPolygon, contains, type Neighborhood, type AreaFeature } from "../lib/ecotwin/geography";
 import type { EcoCell, InterventionTool, TwinLocation, ViewMode } from "../lib/ecotwin/types";
 
-// Preserve the imported footprints and physical heights, but exaggerate raised
-// geometry so it remains legible at the neighborhood-scale camera distance.
-const BUILDING_HEIGHT_SCALE = 2.5;
-const MAX_EXTRA_BUILDING_HEIGHT = 3;
-const TREE_HEIGHT_SCALE = 2.25;
-const TREE_WIDTH_SCALE = 1.35;
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 // Keep the flat render layers physically separate. The neighborhood slab ends at
 // y=0; drawing the cell grid there too makes the GPU alternate between their
@@ -20,12 +14,13 @@ const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 const CELL_SURFACE_Y = 0.006;
 const MAPPED_SURFACE_Y = 0.014;
 const EDITED_SURFACE_Y = 0.025;
-// These dimensions are visually exaggerated just enough to read from the
-// neighborhood camera. One scene unit represents ten metres.
+// One scene unit represents ten metres. Raised details use physical dimensions.
 const PAVEMENT_HEIGHT = 0.004;
-const LANDSCAPE_HEIGHT = 0.018;
-const CURB_HEIGHT = 0.026;
-const CURB_WIDTH = 0.035;
+const LANDSCAPE_HEIGHT = 0.006;
+const CURB_HEIGHT = 0.015; // 15 cm
+const CURB_WIDTH = 0.015; // 15 cm
+const TREE_CANOPY_DIAMETER = 0.8; // 8 m, matching the physics assumption
+const TREE_HEIGHT = 1; // 10 m mature-tree display assumption
 
 const THERMAL_COLORS = ["#3642b9", "#168fd1", "#35c7b2", "#f3d65b", "#f58a36", "#d53645", "#811b55"];
 function thermalColor(temperature: number) {
@@ -177,13 +172,75 @@ function Curbs({ features, boundary }: { features: AreaFeature[]; boundary: Mult
   );
 }
 
+type Stall = { id: string; points: [number, number, number][]; inferred: boolean };
+
+function ringCenter(ring: Pair[]): Pair {
+  const usable = ring.length > 1 && ring[0][0] === ring[ring.length - 1][0] && ring[0][1] === ring[ring.length - 1][1] ? ring.slice(0, -1) : ring;
+  return usable.reduce<Pair>((sum, point) => [sum[0] + point[0] / usable.length, sum[1] + point[1] / usable.length], [0, 0]);
+}
+
+function inferredStalls(lot: AreaFeature): Stall[] {
+  const stalls: Stall[] = [];
+  for (let polygonIndex = 0; polygonIndex < lot.polygons.length; polygonIndex++) {
+    const polygon = lot.polygons[polygonIndex], ring = polygon[0];
+    if (!ring || ring.length < 4) continue;
+    const center = ringCenter(ring);
+    let longest: [Pair, Pair] = [ring[0], ring[1]], longestLength = 0;
+    for (let index = 0; index < ring.length - 1; index++) {
+      const length = Math.hypot(ring[index + 1][0] - ring[index][0], ring[index + 1][1] - ring[index][1]);
+      if (length > longestLength) { longestLength = length; longest = [ring[index], ring[index + 1]]; }
+    }
+    const angle = Math.atan2(longest[1][1] - longest[0][1], longest[1][0] - longest[0][0]);
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    const local = (point: Pair): Pair => { const x = point[0] - center[0], z = point[1] - center[1]; return [x * cos + z * sin, -x * sin + z * cos]; };
+    const world = ([u, v]: Pair): Pair => [center[0] + u * cos - v * sin, center[1] + u * sin + v * cos];
+    const localRing = ring.map(local);
+    const minU = Math.min(...localRing.map(([u]) => u)), maxU = Math.max(...localRing.map(([u]) => u));
+    const minV = Math.min(...localRing.map(([, v]) => v)), maxV = Math.max(...localRing.map(([, v]) => v));
+    const stallWidth = 0.27, stallDepth = 0.54, aisle = 0.62, module = stallDepth * 2 + aisle;
+    for (let moduleV = minV + 0.08; moduleV + module <= maxV - 0.08; moduleV += module) {
+      for (const v0 of [moduleV, moduleV + stallDepth + aisle]) {
+        for (let u0 = minU + 0.08; u0 + stallWidth <= maxU - 0.08; u0 += stallWidth) {
+          const corners = [[u0, v0], [u0 + stallWidth, v0], [u0 + stallWidth, v0 + stallDepth], [u0, v0 + stallDepth]] as Pair[];
+          const worldCorners = corners.map(world);
+          if (!worldCorners.every((point) => contains(point, [polygon]))) continue;
+          const points = [...worldCorners, worldCorners[0]].map(([x, z]) => [x, MAPPED_SURFACE_Y + 0.012, z] as [number, number, number]);
+          stalls.push({ id: `${lot.id}-${polygonIndex}-${stalls.length}`, points, inferred: true });
+          if (stalls.length >= 400) return stalls;
+        }
+      }
+    }
+  }
+  return stalls;
+}
+
+function ParkingModels({ features }: { features: AreaFeature[] }) {
+  const stalls = useMemo(() => {
+    const mapped = features.filter((feature) => feature.kind === "parking_space");
+    const result: Stall[] = mapped.flatMap((feature) => feature.polygons.map((polygon, index) => ({
+      id: `${feature.id}-${index}`, inferred: false,
+      points: polygon[0].map(([x, z]) => [x, MAPPED_SURFACE_Y + 0.012, z] as [number, number, number]),
+    })));
+    for (const lot of features.filter((feature) => feature.kind === "parking_lot")) {
+      const hasMappedStalls = mapped.some((space) => space.polygons.some((polygon) => contains(ringCenter(polygon[0]), lot.polygons)));
+      if (!hasMappedStalls) result.push(...inferredStalls(lot));
+    }
+    return result;
+  }, [features]);
+  return <>
+    {features.filter((feature) => feature.kind === "parking_lot").flatMap((feature) => feature.polygons.map((polygon, index) =>
+      <Line key={`${feature.id}-edge-${index}`} points={polygon[0].map(([x, z]) => [x, MAPPED_SURFACE_Y + 0.01, z] as [number, number, number])}
+        color="#aab2b2" lineWidth={0.8} transparent opacity={0.8} />,
+    ))}
+    {stalls.map((stall) => <Line key={stall.id} points={stall.points} color={stall.inferred ? "#d8dedb" : "#f0f3f0"}
+      lineWidth={stall.inferred ? 0.85 : 1.35} transparent opacity={stall.inferred ? 0.72 : 0.95} />)}
+  </>;
+}
+
 function Building({ feature, cells, baselineById, gridSize, mode, tool, onSelect, rainfallMm }: {
   rainfallMm: number; feature: AreaFeature; cells: EcoCell[]; baselineById: Map<string, EcoCell>; gridSize: number; mode: ViewMode; tool: InterventionTool; onSelect: (id: string) => void;
 }) {
-  const displayHeight = feature.height + Math.min(
-    feature.height * (BUILDING_HEIGHT_SCALE - 1),
-    MAX_EXTRA_BUILDING_HEIGHT,
-  );
+  const displayHeight = feature.height;
   const roofs = useMemo(() => cells.filter((cell) => cell.buildingId === feature.id && (mode !== "surface" || cell.surfaceType === "green_roof"))
     .map((cell) => ({ cell, polygons: polygonClipping.intersection(feature.polygons, cellPolygon(cell.row, cell.col, gridSize)) })), [cells, feature, gridSize, mode]);
   function click(event: ThreeEvent<MouseEvent>) {
@@ -216,9 +273,9 @@ function Building({ feature, cells, baselineById, gridSize, mode, tool, onSelect
 
 function Tree({ x, z, color, onClick }: { x: number; z: number; color: string; onClick?: (event: ThreeEvent<MouseEvent>) => void }) {
   return (
-    <group position={[x, 0, z]} scale={[TREE_WIDTH_SCALE, TREE_HEIGHT_SCALE, TREE_WIDTH_SCALE]} onClick={onClick}>
-      <mesh castShadow position={[0, 0.25, 0]}><cylinderGeometry args={[0.045, 0.065, 0.5, 6]} /><meshStandardMaterial color="#79583b" roughness={1} /></mesh>
-      <mesh castShadow receiveShadow position={[0, 0.65, 0]}><icosahedronGeometry args={[0.32, 1]} /><meshStandardMaterial color={color} roughness={0.92} /></mesh>
+    <group position={[x, 0, z]} onClick={onClick}>
+      <mesh castShadow position={[0, TREE_HEIGHT * 0.28, 0]}><cylinderGeometry args={[0.045, 0.065, TREE_HEIGHT * 0.56, 8]} /><meshStandardMaterial color="#79583b" roughness={1} /></mesh>
+      <mesh castShadow receiveShadow position={[0, TREE_HEIGHT * 0.7, 0]} scale={[1, 0.75, 1]}><icosahedronGeometry args={[TREE_CANOPY_DIAMETER / 2, 2]} /><meshStandardMaterial color={color} roughness={0.92} /></mesh>
     </group>
   );
 }
@@ -299,11 +356,12 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
         {viewMode === "surface" && neighborhood.features.filter((f) => f.surface !== "building").map((feature, index) => (
           <Footprint key={feature.id} polygons={feature.polygons}
             height={feature.surface === "asphalt" ? PAVEMENT_HEIGHT : LANDSCAPE_HEIGHT}
-            y={MAPPED_SURFACE_Y + index * 0.00003} color={SURFACE_COLORS[feature.surface]}
+            y={MAPPED_SURFACE_Y + index * 0.00003} color={feature.kind === "parking_space" ? "#747d7c" : SURFACE_COLORS[feature.surface]}
             roughness={feature.surface === "asphalt" ? 0.72 : 0.96}
             onClick={(e) => clickCell(e, cellAt(e.point.x, e.point.z, gridSize))} />
         ))}
         {viewMode === "surface" && <Curbs features={neighborhood.features} boundary={neighborhood.boundary} />}
+        {viewMode === "surface" && <ParkingModels features={neighborhood.features} />}
         {viewMode === "temperature" && <ThermalField cells={cells} boundary={neighborhood.boundary} gridSize={gridSize}
           onClick={(event) => clickCell(event, cellAt(event.point.x, event.point.z, gridSize))} />}
         {cells.map((cell) => {

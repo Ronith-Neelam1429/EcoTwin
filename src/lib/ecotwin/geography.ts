@@ -12,6 +12,7 @@ export type AreaFeature = {
   id: string;
   polygons: MultiPolygon;
   surface: "building" | "asphalt" | "grass" | "tree";
+  kind: "building" | "road" | "cul_de_sac" | "parking_lot" | "parking_space" | "landscape";
   name?: string;
   height: number;
   heightSource: "tag" | "levels" | "assumed";
@@ -22,6 +23,9 @@ export type Neighborhood = {
   baseline: EcoCell[];
   buildings: number;
   roads: number;
+  culDeSacs: number;
+  parkingLots: number;
+  mappedParkingSpaces: number;
   assumedHeights: number;
   unknownCells: number;
   gridSize: number;
@@ -87,6 +91,14 @@ function ringArea(ring: Pair[]) {
 function polygonArea(polygons: MultiPolygon) {
   return polygons.reduce((total, [outer, ...holes]) =>
     total + ringArea(outer) - holes.reduce((sum, hole) => sum + ringArea(hole), 0), 0);
+}
+
+function circlePolygon([x, z]: Pair, radius: number, sides = 32): MultiPolygon {
+  const ring = Array.from({ length: sides + 1 }, (_, index): Pair => {
+    const angle = index / sides * Math.PI * 2;
+    return [x + Math.cos(angle) * radius, z + Math.sin(angle) * radius];
+  });
+  return [[ring]];
 }
 
 export function cellPolygon(row: number, col: number, gridSize = GRID_SIZE): Polygon {
@@ -238,6 +250,22 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
   const features: AreaFeature[] = [];
   const trees: Neighborhood["trees"] = [];
   let roads = 0;
+  const explicitTurningCenters: Pair[] = [];
+
+  // Count every road vertex so a terminal residential endpoint can be
+  // distinguished from a junction when a source omits turning-circle nodes.
+  const roadVertexCounts = new Map<string, number>();
+  const vertexKey = ([x, z]: Pair) => `${x.toFixed(3)},${z.toFixed(3)}`;
+  for (const feature of geojson.features) {
+    const tags = (feature.properties ?? {}) as Record<string, string>;
+    const geometry = feature.geometry;
+    if (!geometry || !tags.highway || !["LineString", "MultiLineString"].includes(geometry.type)) continue;
+    const lines = geometry.type === "LineString" ? [geometry.coordinates] : geometry.type === "MultiLineString" ? geometry.coordinates : [];
+    for (const line of lines) for (const [lng, lat] of line) {
+      const key = vertexKey(project(lng, lat, origin));
+      roadVertexCounts.set(key, (roadVertexCounts.get(key) ?? 0) + 1);
+    }
+  }
 
   for (const feature of geojson.features) {
     const tags = (feature.properties ?? {}) as Record<string, string>;
@@ -245,6 +273,16 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
     const geometry = feature.geometry;
     const id = String(feature.id);
     if (!geometry) continue;
+    if (geometry.type === "Point" && /^(turning_circle|turning_loop)$/.test(tags.highway ?? "")) {
+      const point = project(geometry.coordinates[0], geometry.coordinates[1], origin);
+      const diameter = parseMeters(tags.diameter) ?? parseMeters(tags.width) ?? 18;
+      const polygons = clipToBoundary(circlePolygon(point, diameter / CELL_METERS / 2), boundary);
+      if (polygons.length) {
+        explicitTurningCenters.push(point);
+        features.push({ id, polygons, surface: "asphalt", kind: "cul_de_sac", height: 0, heightSource: "assumed" });
+      }
+      continue;
+    }
     if (geometry.type === "Point" && tags.natural === "tree") {
       const point = project(geometry.coordinates[0], geometry.coordinates[1], origin);
       if (contains(point, boundary)) trees.push({ id, point });
@@ -253,7 +291,7 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
 
     let surface: AreaFeature["surface"] | undefined;
     if (tags.building && tags.building !== "no") surface = "building";
-    else if (tags.highway || tags.amenity === "parking" || tags.landuse === "highway") surface = "asphalt";
+    else if (tags.highway || tags.amenity === "parking" || tags.amenity === "parking_space" || tags.landuse === "highway") surface = "asphalt";
     else if (tags.natural === "wood" || tags.landuse === "forest") surface = "tree";
     else if (/^(grass|meadow|recreation_ground|village_green)$/.test(tags.landuse ?? "") || /^(grassland|scrub)$/.test(tags.natural ?? "") || /^(park|garden|pitch)$/.test(tags.leisure ?? "")) surface = "grass";
     if (!surface) continue;
@@ -272,7 +310,34 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
     if (duplicate) duplicate.polygons = polygonClipping.union(duplicate.polygons, polygons);
     else {
       if (tags.highway) roads++;
-      features.push({ id, polygons, surface, name: tags.name, ...buildingHeight(tags) });
+      const kind: AreaFeature["kind"] = surface === "building" ? "building"
+        : tags.amenity === "parking_space" ? "parking_space"
+          : tags.amenity === "parking" ? "parking_lot"
+            : tags.highway ? "road" : "landscape";
+      features.push({ id, polygons, surface, kind, name: tags.name, ...buildingHeight(tags) });
+    }
+  }
+
+  // Generalized tile data often drops tagged turning-circle nodes. Add a
+  // standard 18 m bulb only to isolated residential endpoints well inside the
+  // study boundary; exact mapped circles above always take precedence.
+  const inferredCenters: Pair[] = [];
+  for (const feature of geojson.features) {
+    const tags = (feature.properties ?? {}) as Record<string, string>;
+    const geometry = feature.geometry;
+    if (!geometry || !/^(residential|living_street)$/.test(tags.highway ?? "") || !["LineString", "MultiLineString"].includes(geometry.type)) continue;
+    const lines = geometry.type === "LineString" ? [geometry.coordinates] : geometry.type === "MultiLineString" ? geometry.coordinates : [];
+    for (const line of lines) for (const coordinates of [line[0], line[line.length - 1]]) {
+      if (!coordinates) continue;
+      const point = project(coordinates[0], coordinates[1], origin);
+      if ((roadVertexCounts.get(vertexKey(point)) ?? 0) !== 1) continue;
+      const radius = 0.9;
+      const hasClearance = Array.from({ length: 8 }, (_, index) => index * Math.PI / 4)
+        .every((angle) => contains([point[0] + Math.cos(angle) * radius, point[1] + Math.sin(angle) * radius], boundary));
+      if (!hasClearance || explicitTurningCenters.some((center) => Math.hypot(center[0] - point[0], center[1] - point[1]) < radius)
+        || inferredCenters.some((center) => Math.hypot(center[0] - point[0], center[1] - point[1]) < radius)) continue;
+      inferredCenters.push(point);
+      features.push({ id: `${String(feature.id)}-turnaround`, polygons: circlePolygon(point, radius), surface: "asphalt", kind: "cul_de_sac", height: 0, heightSource: "assumed" });
     }
   }
 
@@ -314,6 +379,9 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
   const buildings = features.filter((f) => f.surface === "building");
   return {
     features, trees, baseline, buildings: buildings.length, roads, gridSize, boundary,
+    culDeSacs: features.filter((feature) => feature.kind === "cul_de_sac").length,
+    parkingLots: features.filter((feature) => feature.kind === "parking_lot").length,
+    mappedParkingSpaces: features.filter((feature) => feature.kind === "parking_space").length,
     assumedHeights: buildings.filter((f) => f.heightSource !== "tag").length,
     unknownCells: baseline.filter((c) => c.surfaceType === "unknown").length,
   };
@@ -325,7 +393,7 @@ export function neighborhoodQuery(location: TwinLocation) {
   const latDelta = queryRadius / EARTH_RADIUS / radians;
   const lngDelta = latDelta / Math.cos(location.lat * radians);
   const bounds = [location.lat - latDelta, location.lng - lngDelta, location.lat + latDelta, location.lng + lngDelta].join(",");
-  return `[out:json][timeout:25];(nwr[building][building!=no](${bounds});way[highway](${bounds});nwr[landuse~"^(grass|meadow|forest|recreation_ground|village_green)$"](${bounds});nwr[natural~"^(wood|grassland|scrub|tree)$"](${bounds});nwr[leisure~"^(park|garden|pitch)$"](${bounds});nwr[amenity=parking](${bounds}););out geom;`;
+  return `[out:json][timeout:25];(nwr[building][building!=no](${bounds});way[highway](${bounds});nwr[highway~"^(turning_circle|turning_loop)$"](${bounds});nwr[landuse~"^(grass|meadow|forest|recreation_ground|village_green)$"](${bounds});nwr[natural~"^(wood|grassland|scrub|tree)$"](${bounds});nwr[leisure~"^(park|garden|pitch)$"](${bounds});nwr[amenity~"^(parking|parking_space)$"](${bounds}););out geom;`;
 }
 
 // Cache only in this page's memory: no saved address or location history.
@@ -336,8 +404,20 @@ export function loadNeighborhood(location: TwinLocation): Promise<Neighborhood> 
   const cached = requests.get(cacheKey);
   if (cached) return cached;
   const request = (async () => {
-    const { loadVectorNeighborhood } = await import("./vectorSource");
-    const neighborhood = await loadVectorNeighborhood(location);
+    let neighborhood: Neighborhood;
+    try {
+      const response = await fetch("https://overpass-api.de/api/interpreter", {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body: new URLSearchParams({ data: query }),
+        signal: AbortSignal.timeout(28000),
+      });
+      if (!response.ok) throw new Error("Detailed map request failed.");
+      neighborhood = parseNeighborhood(await response.json(), location);
+    } catch {
+      const { loadVectorNeighborhood } = await import("./vectorSource");
+      neighborhood = await loadVectorNeighborhood(location);
+    }
     if (requests.size > 8) requests.delete(requests.keys().next().value!);
     return neighborhood;
   })();

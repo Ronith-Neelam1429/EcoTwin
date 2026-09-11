@@ -66,6 +66,14 @@ Runoff is local cell outflow, not a flood depth, peak discharge, or water routed
 
 One result is calculated per distinct surface type for each run; cells then share that result. This is intentional: current forcing and material parameters are uniform within each class. The model has no spatial transfer process. The scene preserves geometry but still classifies whole cells, including partially occupied building cells, which can bias total roof area. The interface exposes the unknown-ground fraction.
 
+## Geometry scale and source
+
+The 3D scene uses one unit per 10 metres in every direction. Mapped building footprints and tagged heights are rendered without vertical exaggeration; when height is absent, the model assumes 6 metres. Road widths prefer an explicit OpenStreetMap width, then lane and parking tags, then a road-class default. Curbs are displayed at 0.15 metres. The mature-tree scenario uses an 8 metre crown diameter (about 50 m² projected canopy) and a 10 metre display height, consistent with its cell-scale canopy assumption.
+
+EcoTwin first requests unsimplified OpenStreetMap geometry through Overpass, including parking lots and individually mapped parking spaces. It falls back to generalized vector tiles if that service is unavailable.
+
+The scene categorizes mapped areas before choosing a display model. Parking lots use individually mapped stall polygons when available. A lot with only an outer boundary receives a generated layout aligned to its longest boundary edge, using 2.7 × 5.4 metre stalls and 6.2 metre drive aisles; that layout is a dimensional estimate rather than surveyed striping. Tagged turning circles use their mapped width or diameter. When generalized fallback data omits the turning-circle node, an isolated residential-road endpoint receives an 18 metre turnaround only when the full bulb fits inside the selected area.
+
 ## Parameter provenance and calibration
 
 `cellProperties.ts` contains all material parameters with units and `scenario.ts` contains default forcing. Apart from physical constants and cited equation forms, the material values are **engineering assumptions chosen for this prototype**, not certified product specifications, mapped measurements, or a fitted dataset. Unknown ground is an assumed partially evaporating soil surface. No numerical confidence interval is displayed because there is no measured parameter distribution to support one.

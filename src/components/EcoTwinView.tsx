@@ -211,6 +211,8 @@ function LoadedTwin({
           <div className="geography-summary">
             <strong>{neighborhood.buildings} BLDG</strong>
             <span>{neighborhood.roads} ROAD</span>
+            {neighborhood.parkingLots > 0 && <span>{neighborhood.parkingLots} PARKING</span>}
+            {neighborhood.culDeSacs > 0 && <span>{neighborhood.culDeSacs} CUL-DE-SAC</span>}
             <span>{Math.round(unknownAreaFraction * 100)}% UNMAPPED</span>
             {neighborhood.buildings === 0 && (
               <span>No building footprints</span>
