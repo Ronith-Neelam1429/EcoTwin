@@ -289,11 +289,9 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
           setStreetViewActive(panorama.getVisible());
           if (panorama.getVisible()) setMessage("");
         });
-        panorama.addListener("position_changed", () => {
-          const position = panorama.getPosition();
-          if (position && panorama.getVisible())
-            selectedLocation.current = position;
-        });
+        // Street View often snaps to a panorama several metres away from the
+        // selected property. Deliberately do not copy panorama position changes
+        // into selectedLocation: the panorama contributes only view direction.
         setStatus("ready");
       } catch (error) {
         console.error("Google Maps failed to load", error);
@@ -477,12 +475,7 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
     const map = mapInstance.current;
     if (!map) return;
     const panorama = map.getStreetView();
-    const rawPosition = panorama.getVisible()
-      ? panorama.getPosition()
-      : selectedLocation.current;
-    if (!rawPosition) return;
-
-    const position = toLiteral(rawPosition);
+    const position = toLiteral(selectedLocation.current);
     const pov = panorama.getPov();
     const boundary = selectionMode === "custom" ? customBoundaryPoints : undefined;
     if (boundary && boundary.length < 3) {

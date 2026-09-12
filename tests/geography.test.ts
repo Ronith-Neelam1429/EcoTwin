@@ -53,6 +53,9 @@ test("height precedence and units are explicit", () => {
   assert.equal(parseMeters("two storeys"), undefined);
   assert.deepEqual(buildingHeight({ height: "12", "building:levels": "2" }), { height: 1.2, heightSource: "tag" });
   assert.deepEqual(buildingHeight({ "building:levels": "2" }), { height: 0.6, heightSource: "levels" });
+  assert.deepEqual(buildingHeight({ "building:levels": "2", "roof:height": "2 m" }), { height: 0.8, heightSource: "levels" });
+  assert.deepEqual(buildingHeight({ building: "garage" }), { height: 0.3, heightSource: "assumed" });
+  assert.deepEqual(buildingHeight({ building: "apartments" }), { height: 0.9, heightSource: "assumed" });
   assert.deepEqual(buildingHeight({}), { height: 0.6, heightSource: "assumed" });
 });
 
@@ -160,4 +163,6 @@ test("query rejects invalid positions and requests complete geometry", () => {
   assert.match(neighborhoodQuery(origin), /out geom;/);
   assert.match(neighborhoodQuery(origin), /parking_space/);
   assert.match(neighborhoodQuery(origin), /turning_circle/);
+  assert.match(neighborhoodQuery(origin), /orchard/);
+  assert.match(neighborhoodQuery(origin), /golf_course/);
 });

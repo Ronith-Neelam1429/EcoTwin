@@ -57,8 +57,8 @@ export function tileTags(layer: string, properties: Record<string, unknown>): Re
   }
   if (layer === "landcover" || layer === "landuse" || layer === "park") {
     if (kind === "tree" || subclass === "tree") return { natural: "tree" };
-    if (["wood", "forest"].includes(kind)) return { natural: "wood" };
-    if (["grass", "grassland", "meadow", "garden", "park", "recreation_ground", "village_green"].includes(kind) || layer === "park") return { landuse: "grass" };
+    if (["wood", "forest", "orchard"].includes(kind)) return { natural: "wood" };
+    if (["grass", "grassland", "meadow", "garden", "park", "cemetery", "recreation_ground", "village_green", "golf_course"].includes(kind) || layer === "park") return { landuse: "grass" };
     if (kind === "parking") return { amenity: "parking" };
   }
   return null;

@@ -1917,8 +1917,37 @@ a:focus-visible {
 .scene-key {
   top: 10px;
   left: 10px;
+  max-width: calc(100% - 20px);
+  flex-wrap: wrap;
   padding: 6px 8px;
   font-size: 11px;
+}
+
+.scene-key-title {
+  color: #fff;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.scene-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.scene-key-item + .scene-key-item::before {
+  margin-right: 2px;
+  color: #6f7b85;
+  content: "·";
+}
+
+.scene-key-item i {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border: 1px solid rgb(255 255 255 / 24%);
+  border-radius: 2px;
 }
 
 .geography-summary {
@@ -1972,7 +2001,7 @@ a:focus-visible {
 }
 
 .unknown-swatch {
-  background: #8f9998;
+  background: #b9ad91;
 }
 
 .origin-swatch {

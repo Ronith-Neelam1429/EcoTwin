@@ -263,7 +263,8 @@ function Building({ feature, cells, baselineById, gridSize, mode, tool, onSelect
   }
   return (
     <group>
-      <Footprint polygons={feature.polygons} height={displayHeight} color={"#c5c9cf"} roughness={0.78} onClick={click} />
+      <Footprint polygons={feature.polygons} height={displayHeight} color={SURFACE_COLORS.building} roughness={0.82} onClick={click} />
+      {mode === "surface" && <Footprint polygons={feature.polygons} y={displayHeight + 0.018} color="#d8bea8" roughness={0.9} onClick={click} />}
       {roofs.filter((r) => r.polygons.length).map(({ cell, polygons }) => (
         <Footprint key={cell.id} polygons={polygons} y={displayHeight + 0.035} unlit={mode !== "surface"} color={colorFor(cell, baselineById.get(cell.id), mode, rainfallMm)} onClick={click} />
       ))}
@@ -343,8 +344,8 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
     <div className="scene-canvas">
       <Canvas shadows frameloop="demand" dpr={[1, 1.5]} camera={{ position: cameraPosition, fov: 48, near: 0.5, far: 300 }}>
         <CaptureBridge captureRef={captureRef} viewMode={viewMode} />
-        <color attach="background" args={["#c9d1d7"]} />
-        <fog attach="fog" args={["#c9d1d7", gridSize * 1.5, gridSize * 4]} />
+        <color attach="background" args={["#b9d4e7"]} />
+        <fog attach="fog" args={["#b9d4e7", gridSize * 1.5, gridSize * 4]} />
         <hemisphereLight args={["#e8f2ff", "#6f746d", 0.8]} />
         <ambientLight intensity={0.45} />
         <directionalLight castShadow position={[-15, 28, 10]} intensity={2.15}
@@ -395,7 +396,17 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
         <OrbitControls makeDefault enableDamping minDistance={Math.max(3, gridSize / 6)} maxDistance={gridSize * 2.5} maxPolarAngle={Math.PI / 2.1} />
       </Canvas>
       <div className={viewMode === "surface" ? "scene-key" : "layer-legend"}>
-        {viewMode === "surface" ? <><span className="unknown-swatch" />Unmapped ground · <span className="origin-swatch" />Selected location</>
+        {viewMode === "surface" ? <>
+          <strong className="scene-key-title">Existing</strong>
+          {[
+            ["Road / asphalt", SURFACE_COLORS.asphalt],
+            ["Building", SURFACE_COLORS.building],
+            ["Grass", SURFACE_COLORS.grass],
+            ["Trees", SURFACE_COLORS.tree],
+            ["Unmapped", SURFACE_COLORS.unknown],
+          ].map(([label, color]) => <span className="scene-key-item" key={label}><i style={{ backgroundColor: color }} />{label}</span>)}
+          <span className="scene-key-item"><i className="origin-swatch" />Selected location</span>
+        </>
           : <>
             <div className="layer-legend-heading"><strong>{viewMode === "temperature" ? "Surface temperature" : viewMode === "solar" ? "Sunlight & canopy" : "Runoff reduction"}</strong><span>MODELED</span></div>
             <p>{viewMode === "temperature" ? "Explore warmer surfaces and cooler planting areas." : viewMode === "solar" ? "Darker areas indicate shade or less absorbed sunlight." : "Deeper blue shows more rain kept out of runoff."}</p>

@@ -56,14 +56,16 @@ export function validateSurfaceParameters(p: SurfaceParameters) {
 }
 
 export const SURFACE_COLORS: Record<SurfaceType, string> = {
-  unknown: "#d0cec3",
-  asphalt: "#65706f",
-  grass: "#75aa64",
-  building: "#c1b6a4",
-  tree: "#2f7d4a",
-  rain_garden: "#48a88c",
-  green_roof: "#78b85d",
-  permeable_pavement: "#9d9b8d",
+  // The surface palette is semantic rather than decorative: neutral unmapped
+  // ground, dark paving, living greens, and warm built structures.
+  unknown: "#b9ad91",
+  asphalt: "#343a40",
+  grass: "#69ad45",
+  building: "#b56f52",
+  tree: "#236b3d",
+  rain_garden: "#1d9a73",
+  green_roof: "#8bc34a",
+  permeable_pavement: "#8d8170",
 };
 
 export const SURFACE_LABELS: Record<SurfaceType, string> = {

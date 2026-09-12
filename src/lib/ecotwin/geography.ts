@@ -126,10 +126,20 @@ export function buildingHeight(tags: Record<string, string>) {
   const height = parseMeters(tags.height);
   if (height) return { height: height / CELL_METERS, heightSource: "tag" as const };
   const levels = Number(tags["building:levels"]);
-  if (Number.isFinite(levels) && levels > 0 && levels < 200) return { height: levels * 3 / CELL_METERS, heightSource: "levels" as const };
+  if (Number.isFinite(levels) && levels > 0 && levels < 200) {
+    const roofLevels = Number(tags["roof:levels"]);
+    const roofHeight = parseMeters(tags["roof:height"])
+      ?? (Number.isFinite(roofLevels) && roofLevels > 0 && roofLevels < 20 ? roofLevels * 2.2 : 0);
+    return { height: (levels * 3 + roofHeight) / CELL_METERS, heightSource: "levels" as const };
+  }
   const renderHeight = parseMeters(tags.render_height);
   if (renderHeight) return { height: renderHeight / CELL_METERS, heightSource: "assumed" as const };
-  return { height: 0.6, heightSource: "assumed" as const };
+  const type = tags.building ?? "";
+  const assumedMeters = /^(garage|garages|carport|shed|roof)$/.test(type) ? 3
+    : /^(apartments|hotel|dormitory|hospital|office)$/.test(type) ? 9
+      : /^(school|college|university|commercial|retail|industrial|warehouse)$/.test(type) ? 7.5
+        : 6;
+  return { height: assumedMeters / CELL_METERS, heightSource: "assumed" as const };
 }
 
 const DEFAULT_ROAD_WIDTH_METERS: Record<string, number> = {
@@ -292,8 +302,8 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
     let surface: AreaFeature["surface"] | undefined;
     if (tags.building && tags.building !== "no") surface = "building";
     else if (tags.highway || tags.amenity === "parking" || tags.amenity === "parking_space" || tags.landuse === "highway") surface = "asphalt";
-    else if (tags.natural === "wood" || tags.landuse === "forest") surface = "tree";
-    else if (/^(grass|meadow|recreation_ground|village_green)$/.test(tags.landuse ?? "") || /^(grassland|scrub)$/.test(tags.natural ?? "") || /^(park|garden|pitch)$/.test(tags.leisure ?? "")) surface = "grass";
+    else if (tags.natural === "wood" || /^(forest|orchard)$/.test(tags.landuse ?? "")) surface = "tree";
+    else if (/^(grass|meadow|recreation_ground|village_green|cemetery)$/.test(tags.landuse ?? "") || /^(grassland|scrub|heath)$/.test(tags.natural ?? "") || /^(park|garden|pitch|golf_course)$/.test(tags.leisure ?? "")) surface = "grass";
     if (!surface) continue;
 
     let polygons: MultiPolygon = [];
@@ -393,7 +403,7 @@ export function neighborhoodQuery(location: TwinLocation) {
   const latDelta = queryRadius / EARTH_RADIUS / radians;
   const lngDelta = latDelta / Math.cos(location.lat * radians);
   const bounds = [location.lat - latDelta, location.lng - lngDelta, location.lat + latDelta, location.lng + lngDelta].join(",");
-  return `[out:json][timeout:25];(nwr[building][building!=no](${bounds});way[highway](${bounds});nwr[highway~"^(turning_circle|turning_loop)$"](${bounds});nwr[landuse~"^(grass|meadow|forest|recreation_ground|village_green)$"](${bounds});nwr[natural~"^(wood|grassland|scrub|tree)$"](${bounds});nwr[leisure~"^(park|garden|pitch)$"](${bounds});nwr[amenity~"^(parking|parking_space)$"](${bounds}););out geom;`;
+  return `[out:json][timeout:25];(nwr[building][building!=no](${bounds});way[highway](${bounds});nwr[highway~"^(turning_circle|turning_loop)$"](${bounds});nwr[landuse~"^(grass|meadow|forest|orchard|cemetery|recreation_ground|village_green)$"](${bounds});nwr[natural~"^(wood|grassland|scrub|heath|tree)$"](${bounds});nwr[leisure~"^(park|garden|pitch|golf_course)$"](${bounds});nwr[amenity~"^(parking|parking_space)$"](${bounds}););out geom;`;
 }
 
 // Cache only in this page's memory: no saved address or location history.
