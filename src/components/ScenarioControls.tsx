@@ -2,29 +2,24 @@ import { useState } from "react";
 import { SCENARIO_FIELDS, type ScenarioInputs } from "../lib/ecotwin/scenario";
 import type { LocalWeather } from "../lib/ecotwin/weather";
 
-export function ScenarioControls({ inputs, onChange, weather, loading, error, customized, onLoadWeather, onUseDefaults }: {
+export function ScenarioControls({ inputs, onChange, weather, loading, error, customized, onUseDefaults }: {
   inputs: ScenarioInputs; onChange: (inputs: ScenarioInputs) => void;
-  weather: LocalWeather | null; loading: boolean; error: string; customized: boolean; onLoadWeather: () => void; onUseDefaults: () => void;
+  weather: LocalWeather | null; loading: boolean; error: string; customized: boolean; onUseDefaults: () => void;
 }) {
   const [inputError, setInputError] = useState("");
   return (
     <section className="scenario-controls" aria-label="Scenario conditions">
-      <span className="panel-kicker">Scenario conditions</span>
-      <button type="button" className="weather-button" disabled={loading} onClick={onLoadWeather}>
-        {loading ? "Loading local weather…" : "Use recent local weather"}
-      </button>
-      <p className="scenario-note" aria-live="polite">
-        {weather ? `${customized ? "Customized from" : "Weather day:"} ${weather.date} · ${weather.timezone}. Heat snapshot: ${weather.heatTime} (sunniest hour).`
-          : "Design assumptions until weather is loaded."}
-        {weather && <> <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a> modeled weather; soil and materials remain estimates.</>}
-      </p>
+      <h3>Conditions</h3>
+      <div className="weather-status" aria-live="polite">
+        <span>{loading ? "Loading local weather…" : weather
+          ? `${customized ? "Edited local weather" : "Local weather"} · ${weather.date}`
+          : "Design defaults"}</span>
+        {weather && <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Source</a>}
+      </div>
       {error && <p className="scenario-error" role="alert">{error} Current inputs are unchanged.</p>}
       {(["storm", "heat"] as const).map((group) => (
         <details key={group}>
-          <summary>{group === "storm" ? "Rain & soil" : "Heat conditions"}</summary>
-          <p className="scenario-note">{group === "storm"
-            ? `${inputs.rainfallSeriesMm ? "Hourly rain pattern loaded." : "Uniform rainfall over the event."} Storage is reported at the end of the event.`
-            : "Equilibrium surface temperatures for these conditions; separate from the storm simulation."}</p>
+          <summary>{group === "storm" ? "Storm" : "Heat"}</summary>
           {SCENARIO_FIELDS.filter((field) => field.group === group).map(({ key, label, min, max, step }) => (
             <label className="scenario-field" key={key}>
               <span>{label}</span>
@@ -48,7 +43,7 @@ export function ScenarioControls({ inputs, onChange, weather, loading, error, cu
         </details>
       ))}
       {inputError && <p className="scenario-error" role="alert">{inputError}</p>}
-      <button type="button" className="scenario-reset" disabled={loading} onClick={onUseDefaults}>Use design defaults</button>
+      <button type="button" className="scenario-reset" disabled={loading} onClick={onUseDefaults}>Reset conditions</button>
     </section>
   );
 }

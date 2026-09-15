@@ -12,38 +12,27 @@ import type { InterventionTool } from "../lib/ecotwin/types";
 const TOOLS: {
   value: InterventionTool;
   label: string;
-  detail: string;
   icon: typeof TreePine;
 }[] = [
   {
     value: "tree",
-    label: "Mature Tree",
-    detail: "Tree + soil planting area",
+    label: "Tree",
     icon: TreePine,
   },
   {
     value: "rain_garden",
     label: "Rain Garden",
-    detail: "Store rain in this cell",
     icon: Droplets,
   },
   {
     value: "green_roof",
     label: "Green Roof",
-    detail: "Cool buildings",
     icon: Building2,
   },
   {
     value: "permeable_pavement",
-    label: "Permeable",
-    detail: "Improve infiltration",
+    label: "Permeable Ground",
     icon: Grid3X3,
-  },
-  {
-    value: "erase",
-    label: "Restore Cell",
-    detail: "Return to baseline",
-    icon: Eraser,
   },
 ];
 
@@ -63,13 +52,12 @@ export function EcoTwinSidebar({
   return (
     <aside className="twin-sidebar">
       <div className="sidebar-heading">
-        <span className="panel-kicker">Interventions</span>
-        <h2>Design tools</h2>
-        <p>Select a tool, then place it in the model.</p>
+        <h2>Add to model</h2>
+        <p>Choose an item, then click the 3D view.</p>
       </div>
 
       <div className="tool-list">
-        {TOOLS.map(({ value, label, detail, icon: Icon }) => (
+        {TOOLS.map(({ value, label, icon: Icon }) => (
           <button
             key={value}
             type="button"
@@ -81,15 +69,20 @@ export function EcoTwinSidebar({
             </span>
             <span>
               <strong>{label}</strong>
-              <small>{detail}</small>
             </span>
           </button>
         ))}
       </div>
 
-      <button className="reset-button" type="button" onClick={onReset}>
-        <RotateCcw size={16} /> Reset all changes
-      </button>
+      <div className="edit-actions">
+        <button className={`restore-button ${selectedTool === "erase" ? "is-active" : ""}`} type="button"
+          onClick={() => onSelectTool("erase")}>
+          <Eraser size={15} /> Restore one cell
+        </button>
+        <button className="reset-button" type="button" onClick={onReset}>
+          <RotateCcw size={15} /> Reset design
+        </button>
+      </div>
       {children}
     </aside>
   );

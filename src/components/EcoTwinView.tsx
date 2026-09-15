@@ -1,8 +1,8 @@
 import { flushSync } from "react-dom";
 import { RealisticView } from "./RealisticView";
 import type { SceneCapture } from "./EcoTwinScene";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Compass, MapPin } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { MapPin } from "lucide-react";
 import { applyIntervention } from "../lib/ecotwin/applyIntervention";
 import { loadNeighborhood, type Neighborhood } from "../lib/ecotwin/geography";
 import { simulateScenario, simulateScenarioTimeline } from "../lib/ecotwin/simulation";
@@ -88,6 +88,8 @@ function LoadedTwin({
   neighborhood: Neighborhood;
 }) {
   const captureRef = useRef<SceneCapture>(null);
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const draggingPanel = useRef<"left" | "right" | null>(null);
   const baseline = neighborhood.baseline;
   const [cells, setCells] = useState<EcoCell[]>(() =>
     baseline.map((cell) => ({ ...cell })),
@@ -99,9 +101,8 @@ function LoadedTwin({
   const [weather, setWeather] = useState<LocalWeather | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(true);
   const [weatherError, setWeatherError] = useState("");
-  const [weatherAttempt, setWeatherAttempt] = useState(0);
   const [customized, setCustomized] = useState(false);
-  const [workspaceSize, setWorkspaceSize] = useState<"results" | "balanced" | "model">("balanced");
+  const [panelWidths, setPanelWidths] = useState({ left: 220, right: 400 });
   const totalSelectedCoverage = baseline.reduce((sum, cell) => sum + cell.coverage, 0);
   const selectedAreaM2 = totalSelectedCoverage * 100;
   const unknownAreaFraction = totalSelectedCoverage
@@ -119,7 +120,7 @@ function LoadedTwin({
       if (!controller.signal.aborted) setWeatherError(reason instanceof Error ? reason.message : "Weather could not be loaded.");
     }).finally(() => { if (!controller.signal.aborted) setWeatherLoading(false); });
     return () => controller.abort();
-  }, [location, weatherAttempt]);
+  }, [location]);
   const baselineRun = useMemo(() => simulateScenario(baseline, inputs), [baseline, inputs]);
   const currentRun = useMemo(() => simulateScenario(cells, inputs), [cells, inputs]);
   const baselineTimeline = useMemo(() => simulateScenarioTimeline(baseline, inputs), [baseline, inputs]);
@@ -154,6 +155,45 @@ function LoadedTwin({
     setCells(baseline.map((cell) => ({ ...cell })));
   }
 
+  function resizePanel(side: "left" | "right", clientX: number) {
+    const bounds = layoutRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    setPanelWidths((current) => {
+      if (side === "left") {
+        const maximum = Math.max(176, Math.min(360, bounds.width - current.right - 420));
+        return { ...current, left: Math.round(Math.min(maximum, Math.max(176, clientX - bounds.left))) };
+      }
+      const maximum = Math.max(300, Math.min(620, bounds.width - current.left - 420));
+      return { ...current, right: Math.round(Math.min(maximum, Math.max(300, bounds.right - clientX))) };
+    });
+  }
+
+  function startResize(side: "left" | "right", event: PointerEvent<HTMLDivElement>) {
+    draggingPanel.current = side;
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveResize(side: "left" | "right", event: PointerEvent<HTMLDivElement>) {
+    if (draggingPanel.current === side) resizePanel(side, event.clientX);
+  }
+
+  function stopResize(event: PointerEvent<HTMLDivElement>) {
+    draggingPanel.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+
+  function resizeWithKeyboard(side: "left" | "right", event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    const bounds = layoutRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const direction = event.key === "ArrowRight" ? 1 : -1;
+    const boundary = side === "left"
+      ? bounds.left + panelWidths.left + direction * 16
+      : bounds.right - panelWidths.right + direction * 16;
+    resizePanel(side, boundary);
+  }
+
   return (
     <section className="twin-workspace">
       <div className="twin-toolbar">
@@ -172,19 +212,8 @@ function LoadedTwin({
                 `${location.lat.toFixed(5)}, ${location.lng.toFixed(5)}`}
             </strong>
           </div>
-          <span className="heading-readout">
-            <Compass size={14} /> {Math.round(location.heading)}°
-          </span>
         </div>
         <div className="twin-view-actions">
-          <div className="workspace-size-toggle" aria-label="Workspace layout">
-            {(["results", "balanced", "model"] as const).map((size) => (
-              <button type="button" key={size} className={workspaceSize === size ? "is-active" : ""}
-                aria-pressed={workspaceSize === size} onClick={() => setWorkspaceSize(size)}>
-                {size === "results" ? "Results" : size === "balanced" ? "Split" : "3D"}
-              </button>
-            ))}
-          </div>
           <ViewModeToggle value={viewMode} onChange={setViewMode} />
           <RealisticView revision={cells.map((cell) => cell.surfaceType).join(',')} capture={async () => {
             flushSync(() => setViewMode("surface"));
@@ -196,17 +225,24 @@ function LoadedTwin({
         </div>
       </div>
 
-      <div className={`twin-layout layout-${workspaceSize}`}>
+      <div ref={layoutRef} className="twin-layout resizable-layout" style={{
+        "--left-panel": `${panelWidths.left}px`,
+        "--right-panel": `${panelWidths.right}px`,
+      } as CSSProperties}>
         <EcoTwinSidebar
           selectedTool={selectedTool}
           onSelectTool={setSelectedTool}
           onReset={resetGrid}
         >
           <ScenarioControls inputs={inputs} weather={weather} loading={weatherLoading} error={weatherError} customized={customized}
-            onUseDefaults={() => { setInputs({ ...DEFAULT_SCENARIO }); setWeather(null); setCustomized(false); setWeatherError(""); }}
-            onChange={(next) => { setInputs(next); setCustomized(true); }}
-            onLoadWeather={() => { setWeatherLoading(true); setWeatherError(""); setWeatherAttempt((n) => n + 1); }} />
+            onUseDefaults={() => { setInputs({ ...(weather?.inputs ?? DEFAULT_SCENARIO) }); setCustomized(false); }}
+            onChange={(next) => { setInputs(next); setCustomized(true); }} />
         </EcoTwinSidebar>
+        <div className="panel-resizer" role="separator" tabIndex={0} aria-label="Resize design tools"
+          aria-orientation="vertical" aria-valuemin={176} aria-valuemax={360} aria-valuenow={panelWidths.left}
+          onPointerDown={(event) => startResize("left", event)} onPointerMove={(event) => moveResize("left", event)}
+          onPointerUp={stopResize} onPointerCancel={stopResize} onKeyDown={(event) => resizeWithKeyboard("left", event)}
+          onDoubleClick={() => setPanelWidths((current) => ({ ...current, left: 220 }))} />
         <div className="geographic-scene">
           <EcoTwinScene
             captureRef={captureRef}
@@ -220,11 +256,8 @@ function LoadedTwin({
             location={location}
           />
           <div className="geography-summary">
-            <strong>{neighborhood.buildings} BLDG</strong>
-            <span>{neighborhood.roads} ROAD</span>
-            {neighborhood.parkingLots > 0 && <span>{neighborhood.parkingLots} PARKING</span>}
-            {neighborhood.culDeSacs > 0 && <span>{neighborhood.culDeSacs} CUL-DE-SAC</span>}
-            <span>{Math.round(unknownAreaFraction * 100)}% UNMAPPED</span>
+            <strong>{neighborhood.buildings} buildings</strong>
+            <span>{Math.round(unknownAreaFraction * 100)}% unmapped</span>
             {neighborhood.buildings === 0 && (
               <span>No building footprints</span>
             )}
@@ -235,6 +268,11 @@ function LoadedTwin({
             </div>
           )}
         </div>
+        <div className="panel-resizer" role="separator" tabIndex={0} aria-label="Resize design results"
+          aria-orientation="vertical" aria-valuemin={300} aria-valuemax={620} aria-valuenow={panelWidths.right}
+          onPointerDown={(event) => startResize("right", event)} onPointerMove={(event) => moveResize("right", event)}
+          onPointerUp={stopResize} onPointerCancel={stopResize} onKeyDown={(event) => resizeWithKeyboard("right", event)}
+          onDoubleClick={() => setPanelWidths((current) => ({ ...current, right: 400 }))} />
         <MetricsPanel current={currentRun.metrics} baseline={baselineRun.metrics}
           currentTimeline={currentTimeline} baselineTimeline={baselineTimeline} />
       </div>

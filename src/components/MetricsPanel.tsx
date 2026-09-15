@@ -70,20 +70,15 @@ export function MetricsPanel({
     <aside className="metrics-panel">
       <div className="metrics-title">
         <div>
-          <span className="panel-kicker">Analysis</span>
-          <h2>What happens in this design?</h2>
+          <h2>Design results</h2>
+          <p>Compared with the original neighborhood</p>
         </div>
         <span className="intervention-count">
           {current.interventions} placed
         </span>
       </div>
-      <div className="model-note">
-        <span>MODEL ESTIMATE</span>
-        <strong>Useful for comparing designs, not a site measurement.</strong>
-      </div>
 
       <div className="impact-summary">
-        <span className="panel-kicker">Bottom line</span>
         <strong>{overallSummary}</strong>
       </div>
 

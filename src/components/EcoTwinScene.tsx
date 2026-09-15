@@ -1,7 +1,8 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from "react";
-import { Canvas, useThree, type ThreeEvent } from "@react-three/fiber";
+import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, Line, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
+import { Pause, Play } from "lucide-react";
 import polygonClipping, { type MultiPolygon, type Pair } from "polygon-clipping";
 import { SURFACE_COLORS, SURFACE_LABELS } from "../lib/ecotwin/cellProperties";
 import { cellAt, cellPolygon, contains, type Neighborhood, type AreaFeature } from "../lib/ecotwin/geography";
@@ -76,8 +77,14 @@ function colorFor(cell: EcoCell, baseline: EcoCell | undefined, mode: ViewMode, 
     return new THREE.Color().lerpColors(new THREE.Color("#f1d36b"), new THREE.Color("#173f55"), THREE.MathUtils.clamp(effect, 0, 1)).getStyle();
   }
   if (mode === "stormwater") {
-    const avoided = Math.max(0, (baseline?.water ?? cell.water) - cell.water);
-    return new THREE.Color().lerpColors(new THREE.Color("#d9dde0"), new THREE.Color("#1466a0"), THREE.MathUtils.clamp(avoided / Math.max(1, rainfallMm), 0, 1)).getStyle();
+    if (rainfallMm === 0) {
+      const absorbs = ["grass", "tree", "rain_garden", "green_roof", "permeable_pavement"].includes(cell.surfaceType);
+      return new THREE.Color("#d7dde1").lerp(new THREE.Color(absorbs ? "#2d9b72" : "#1676b7"), absorbs ? 0.55 : 0.38).getStyle();
+    }
+    const runoff = THREE.MathUtils.clamp(cell.water / Math.max(1, rainfallMm), 0, 1);
+    const absorbed = THREE.MathUtils.clamp(cell.infiltration, 0, 1);
+    const base = new THREE.Color("#d7dde1");
+    return base.lerp(new THREE.Color(absorbed > runoff ? "#2d9b72" : "#1676b7"), Math.max(absorbed, runoff) * 0.9).getStyle();
   }
   return SURFACE_COLORS[cell.surfaceType];
 }
@@ -302,6 +309,122 @@ function CellSurface({ cell, boundary, gridSize, color, y, inset, onClick }: {
   return <Footprint polygons={polygons} y={y} color={color} onClick={onClick} />;
 }
 
+function seeded(index: number, salt: number) {
+  const value = Math.sin(index * 91.731 + salt * 47.219) * 43758.5453;
+  return value - Math.floor(value);
+}
+
+function RainSimulation({ gridSize, rainfallMm, active }: { gridSize: number; rainfallMm: number; active: boolean }) {
+  const points = useRef<THREE.Points>(null);
+  const count = Math.min(650, Math.max(180, Math.round(Math.max(rainfallMm, 10) * 9)));
+  const positions = useMemo(() => {
+    const result = new Float32Array(count * 3);
+    for (let index = 0; index < count; index++) {
+      result[index * 3] = (seeded(index, 1) - 0.5) * gridSize * 1.08;
+      result[index * 3 + 1] = 0.15 + seeded(index, 2) * gridSize * 0.9;
+      result[index * 3 + 2] = (seeded(index, 3) - 0.5) * gridSize * 1.08;
+    }
+    return result;
+  }, [count, gridSize]);
+  useFrame((_, delta) => {
+    if (!active || !points.current) return;
+    const attribute = points.current.geometry.getAttribute("position") as THREE.BufferAttribute;
+    for (let index = 0; index < count; index++) {
+      const y = attribute.getY(index) - delta * (8 + seeded(index, 4) * 5);
+      attribute.setY(index, y < 0.04 ? gridSize * (0.65 + seeded(index, 5) * 0.3) : y);
+    }
+    attribute.needsUpdate = true;
+  });
+  return <points ref={points} userData={{ captureHidden: true }} frustumCulled={false}>
+    <bufferGeometry><bufferAttribute attach="attributes-position" args={[positions, 3]} /></bufferGeometry>
+    <pointsMaterial color="#258dcc" size={0.16} transparent opacity={0.82} sizeAttenuation depthWrite={false} />
+  </points>;
+}
+
+const ABSORBING_SURFACES = new Set(["grass", "tree", "rain_garden", "permeable_pavement"]);
+
+function CellMotion({ cells, gridSize, mode, active, rainfallMm }: {
+  cells: EcoCell[]; gridSize: number; mode: Exclude<ViewMode, "surface">; active: boolean; rainfallMm: number;
+}) {
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  const candidates = useMemo(() => {
+    if (mode === "stormwater") {
+      const wet = cells.filter((cell) => cell.infiltration > 0.01 || ABSORBING_SURFACES.has(cell.surfaceType));
+      return wet.sort((a, b) => b.infiltration - a.infiltration).slice(0, 180);
+    }
+    if (mode === "temperature") return [...cells].sort((a, b) => b.temperature - a.temperature).slice(0, 140);
+    return [...cells].sort((a, b) => b.absorbedSolar - a.absorbedSolar).slice(0, 140);
+  }, [cells, mode]);
+  const matrix = useMemo(() => new THREE.Matrix4(), []);
+  const position = useMemo(() => new THREE.Vector3(), []);
+  const rotation = useMemo(() => new THREE.Quaternion(), []);
+  const scale = useMemo(() => new THREE.Vector3(), []);
+  const simulationTime = useRef(0);
+  useFrame((_, delta) => {
+    if (!mesh.current) return;
+    if (active) simulationTime.current += delta;
+    const elapsed = simulationTime.current;
+    for (let index = 0; index < candidates.length; index++) {
+      const cell = candidates[index];
+      const phase = (elapsed * (0.45 + seeded(index, 7) * 0.45) + seeded(index, 8)) % 1;
+      const x = cell.col - gridSize / 2 + 0.5 + (seeded(index, 9) - 0.5) * 0.42;
+      const z = cell.row - gridSize / 2 + 0.5 + (seeded(index, 10) - 0.5) * 0.42;
+      const strength = mode === "stormwater" ? Math.max(cell.infiltration, rainfallMm === 0 ? 0.35 : 0.1)
+        : mode === "temperature" ? THREE.MathUtils.clamp((cell.temperature - 20) / 40, 0.15, 1)
+          : THREE.MathUtils.clamp(cell.absorbedSolar / 900, 0.15, 1);
+      const y = mode === "stormwater" ? 0.62 - phase * 0.58 : mode === "temperature" ? 0.08 + phase * 1.5 : 1.7 - phase * 1.6;
+      position.set(x, y, z);
+      rotation.identity();
+      const size = (mode === "stormwater" ? 0.13 + strength * 0.17 : 0.08 + strength * 0.12)
+        * (0.65 + Math.sin(phase * Math.PI) * 0.35);
+      scale.set(size, mode === "temperature" ? size * 1.8 : size, size);
+      matrix.compose(position, rotation, scale);
+      mesh.current.setMatrixAt(index, matrix);
+    }
+    mesh.current.instanceMatrix.needsUpdate = true;
+  });
+  const color = mode === "stormwater" ? "#20f3a0" : mode === "temperature" ? "#ff8a45" : "#ff9d2e";
+  return <instancedMesh ref={mesh} args={[undefined, undefined, candidates.length]} userData={{ captureHidden: true }} frustumCulled={false}>
+    <sphereGeometry args={[1, 8, 6]} />
+    <meshBasicMaterial color={color} transparent opacity={0.78} depthWrite={false} />
+  </instancedMesh>;
+}
+
+function RunoffRipples({ cells, gridSize, active, rainfallMm }: { cells: EcoCell[]; gridSize: number; active: boolean; rainfallMm: number }) {
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  const material = useRef<THREE.MeshBasicMaterial>(null);
+  const runoffCells = useMemo(() => (rainfallMm > 0
+    ? cells.filter((cell) => cell.water > 0.01).sort((a, b) => b.water - a.water)
+    : cells.filter((cell) => cell.surfaceType === "asphalt" || cell.surfaceType === "building" || cell.surfaceType === "unknown"))
+    .slice(0, 140), [cells, rainfallMm]);
+  const simulationTime = useRef(0);
+  useFrame((_, delta) => {
+    if (!mesh.current) return;
+    if (active) simulationTime.current += delta;
+    const elapsed = simulationTime.current;
+    const matrix = new THREE.Matrix4();
+    const rotation = new THREE.Quaternion().setFromEuler(new THREE.Euler(-Math.PI / 2, 0, 0));
+    for (let index = 0; index < runoffCells.length; index++) {
+      const cell = runoffCells[index];
+      const phase = (elapsed * 0.55 + seeded(index, 12)) % 1;
+      const strength = rainfallMm === 0 ? 0.55 : THREE.MathUtils.clamp(cell.water / Math.max(1, rainfallMm), 0.1, 1);
+      matrix.compose(
+        new THREE.Vector3(cell.col - gridSize / 2 + 0.5, 0.065, cell.row - gridSize / 2 + 0.5),
+        rotation,
+        new THREE.Vector3(0.12 + phase * 0.28 * strength, 0.12 + phase * 0.28 * strength, 1),
+      );
+      mesh.current.setMatrixAt(index, matrix);
+    }
+    mesh.current.instanceMatrix.needsUpdate = true;
+    if (material.current) material.current.opacity = active ? 0.18 + (1 - (elapsed * 0.55) % 1) * 0.32 : 0.28;
+  });
+  if (!runoffCells.length) return null;
+  return <instancedMesh ref={mesh} args={[undefined, undefined, runoffCells.length]} userData={{ captureHidden: true }}>
+    <ringGeometry args={[0.62, 1, 24]} />
+    <meshBasicMaterial ref={material} color="#36a8ec" transparent opacity={0.35} depthWrite={false} side={THREE.DoubleSide} />
+  </instancedMesh>;
+}
+
 export type SceneCapture = { capture: () => string };
 function CaptureBridge({ captureRef, viewMode }: { captureRef?: Ref<SceneCapture>; viewMode: ViewMode }) {
   const { gl, scene, camera } = useThree();
@@ -328,6 +451,8 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
   captureRef?: Ref<SceneCapture>; rainfallMm: number; cells: EcoCell[]; baselineCells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: Neighborhood; location: TwinLocation;
 }) {
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
+  const [pausedMode, setPausedMode] = useState<ViewMode | null>(null);
+  const simulationActive = pausedMode !== viewMode;
   const gridSize = neighborhood.gridSize;
   const baselineById = useMemo(() => new Map(baselineCells.map((cell) => [cell.id, cell])), [baselineCells]);
   const selectedResult = selectedCell ? cells.find((cell) => cell.id === selectedCell) : undefined;
@@ -342,7 +467,7 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
   }
   return (
     <div className="scene-canvas">
-      <Canvas shadows frameloop="demand" dpr={[1, 1.5]} camera={{ position: cameraPosition, fov: 48, near: 0.5, far: 300 }}>
+      <Canvas shadows frameloop={viewMode === "surface" || !simulationActive ? "demand" : "always"} dpr={[1, 1.5]} camera={{ position: cameraPosition, fov: 48, near: 0.5, far: 300 }}>
         <CaptureBridge captureRef={captureRef} viewMode={viewMode} />
         <color attach="background" args={["#b9d4e7"]} />
         <fog attach="fog" args={["#b9d4e7", gridSize * 1.5, gridSize * 4]} />
@@ -353,6 +478,13 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
           shadow-camera-left={-halfSize * 1.3} shadow-camera-right={halfSize * 1.3}
           shadow-camera-top={halfSize * 1.3} shadow-camera-bottom={-halfSize * 1.3}
           shadow-camera-near={1} shadow-camera-far={gridSize * 3} shadow-bias={-0.00015} />
+        {viewMode === "stormwater" && <>
+          <RainSimulation gridSize={gridSize} rainfallMm={rainfallMm} active={simulationActive} />
+          <CellMotion cells={cells} gridSize={gridSize} mode="stormwater" active={simulationActive} rainfallMm={rainfallMm} />
+          <RunoffRipples cells={cells} gridSize={gridSize} active={simulationActive} rainfallMm={rainfallMm} />
+        </>}
+        {viewMode === "temperature" && <CellMotion cells={cells} gridSize={gridSize} mode="temperature" active={simulationActive} rainfallMm={rainfallMm} />}
+        {viewMode === "solar" && <CellMotion cells={cells} gridSize={gridSize} mode="solar" active={simulationActive} rainfallMm={rainfallMm} />}
         <Footprint polygons={neighborhood.boundary} height={0.25} y={-0.25} color="#aeb4bc" />
         {viewMode === "surface" && neighborhood.features.filter((f) => f.surface !== "building").map((feature, index) => (
           <Footprint key={feature.id} polygons={feature.polygons}
@@ -395,6 +527,11 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
         <Html position={[0, 0.4, -halfSize - 0.8]} center><span className="north-label">↑ N</span></Html>
         <OrbitControls makeDefault enableDamping minDistance={Math.max(3, gridSize / 6)} maxDistance={gridSize * 2.5} maxPolarAngle={Math.PI / 2.1} />
       </Canvas>
+      {viewMode !== "surface" && <button type="button" className="simulation-toggle" aria-pressed={simulationActive}
+        onClick={() => setPausedMode(simulationActive ? viewMode : null)}>
+        {simulationActive ? <Pause size={14} /> : <Play size={14} />}
+        {simulationActive ? "Pause" : "Play"} {viewMode === "stormwater" ? "storm" : viewMode === "temperature" ? "heat" : "sunlight"}
+      </button>}
       <div className={viewMode === "surface" ? "scene-key" : "layer-legend"}>
         {viewMode === "surface" ? <>
           <strong className="scene-key-title">Existing</strong>
@@ -408,11 +545,15 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
           <span className="scene-key-item"><i className="origin-swatch" />Selected location</span>
         </>
           : <>
-            <div className="layer-legend-heading"><strong>{viewMode === "temperature" ? "Surface temperature" : viewMode === "solar" ? "Sunlight & canopy" : "Runoff reduction"}</strong><span>MODELED</span></div>
-            <p>{viewMode === "temperature" ? "Explore warmer surfaces and cooler planting areas." : viewMode === "solar" ? "Darker areas indicate shade or less absorbed sunlight." : "Deeper blue shows more rain kept out of runoff."}</p>
-            <div className={`layer-gradient scale-${viewMode}`} />
-            <div className="layer-ticks">{(viewMode === "temperature" ? ["10°", "20°", "30°", "40°", "50°", "60°C"] : viewMode === "solar" ? ["Exposed", "Reduced", "Sheltered"] : ["0", `${(Math.max(1, rainfallMm) / 2).toFixed(1)}`, `${Math.max(1, rainfallMm).toFixed(1)} mm`]).map((label) => <span key={label}>{label}</span>)}</div>
-            <small>{viewMode === "temperature" ? "Smooth display · 10 m samples · scale clipped at ends" : viewMode === "solar" ? "Cell-average effect · sunlight, not UV" : rainfallMm === 0 ? "No rain in this scenario. Adjust Rain & soil to test a storm." : "Compared with baseline · event totals"}</small>
+            <div className="layer-legend-heading"><strong>{viewMode === "temperature" ? "Surface heat" : viewMode === "solar" ? "Sunlight & shade" : "Rain & stormwater"}</strong><span>SIMULATION</span></div>
+            <p>{viewMode === "temperature" ? "Orange particles rise from the hottest surfaces." : viewMode === "solar" ? "Gold particles show incoming energy; darker ground absorbs less." : "Rain falls, blue rings mark runoff, and green drops show water soaking in."}</p>
+            {viewMode === "stormwater" ? <div className="stormwater-legend">
+              <span><i className="runoff" />Runs off</span><span><i className="absorbed" />Soaks in</span>
+            </div> : <>
+              <div className={`layer-gradient scale-${viewMode}`} />
+              <div className="layer-ticks">{(viewMode === "temperature" ? ["10°", "20°", "30°", "40°", "50°", "60°C"] : ["Exposed", "Reduced", "Sheltered"]).map((label) => <span key={label}>{label}</span>)}</div>
+            </>}
+            <small>{viewMode === "temperature" ? "Modeled surface temperature, not air temperature" : viewMode === "solar" ? "Cell-average sunlight effect, not UV" : rainfallMm === 0 ? "Rain animation is a preview; set rainfall under Storm for calculated water results." : `${rainfallMm.toFixed(1)} mm modeled storm`}</small>
           </>}
       </div>
       {viewMode !== "surface" && selectedResult && selectedBaseline && (
