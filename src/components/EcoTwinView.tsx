@@ -101,6 +101,7 @@ function LoadedTwin({
   const [weatherError, setWeatherError] = useState("");
   const [weatherAttempt, setWeatherAttempt] = useState(0);
   const [customized, setCustomized] = useState(false);
+  const [workspaceSize, setWorkspaceSize] = useState<"results" | "balanced" | "model">("balanced");
   const totalSelectedCoverage = baseline.reduce((sum, cell) => sum + cell.coverage, 0);
   const selectedAreaM2 = totalSelectedCoverage * 100;
   const unknownAreaFraction = totalSelectedCoverage
@@ -176,6 +177,14 @@ function LoadedTwin({
           </span>
         </div>
         <div className="twin-view-actions">
+          <div className="workspace-size-toggle" aria-label="Workspace layout">
+            {(["results", "balanced", "model"] as const).map((size) => (
+              <button type="button" key={size} className={workspaceSize === size ? "is-active" : ""}
+                aria-pressed={workspaceSize === size} onClick={() => setWorkspaceSize(size)}>
+                {size === "results" ? "Results" : size === "balanced" ? "Split" : "3D"}
+              </button>
+            ))}
+          </div>
           <ViewModeToggle value={viewMode} onChange={setViewMode} />
           <RealisticView revision={cells.map((cell) => cell.surfaceType).join(',')} capture={async () => {
             flushSync(() => setViewMode("surface"));
@@ -187,7 +196,7 @@ function LoadedTwin({
         </div>
       </div>
 
-      <div className="twin-layout">
+      <div className={`twin-layout layout-${workspaceSize}`}>
         <EcoTwinSidebar
           selectedTool={selectedTool}
           onSelectTool={setSelectedTool}
