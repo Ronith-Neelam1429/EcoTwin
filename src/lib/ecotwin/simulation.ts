@@ -7,6 +7,7 @@ import type { EcoCell, EcoMetrics, SurfaceType } from "./types";
 export const CELL_AREA_M2 = 100;
 export type SurfaceOverrides = Partial<Record<SurfaceType, Partial<SurfaceParameters>>>;
 export type CellPhysics = { water: WaterBalance; heat: HeatBalance };
+export type ScenarioTimelinePoint = { elapsedHours: number; metrics: EcoMetrics };
 
 function environment(p: SurfaceParameters, physics: CellPhysics) {
   return {
@@ -81,4 +82,58 @@ export function simulateScenario(
 
 export function calculateMetrics(cells: EcoCell[], inputs: ScenarioInputs = DEFAULT_SCENARIO): EcoMetrics {
   return simulateScenario(cells, inputs).metrics;
+}
+
+/** Cumulative scenario results sampled from the start through the end of the storm.
+ * Loaded rainfall bins are sampled only on their boundaries so their original
+ * timing and intensity are preserved instead of being stretched over partial bins.
+ */
+export function simulateScenarioTimeline(
+  cells: EcoCell[],
+  inputs: ScenarioInputs = DEFAULT_SCENARIO,
+  maxSamples = 24,
+): ScenarioTimelinePoint[] {
+  validateScenario(inputs);
+  if (!Number.isInteger(maxSamples) || maxSamples < 2 || maxSamples > 96)
+    throw new RangeError("Timeline samples must be an integer between 2 and 96.");
+
+  const bins = inputs.rainfallSeriesMm;
+  const intervals = bins?.length ?? maxSamples;
+  const sampleCount = Math.min(intervals, maxSamples);
+  const indices = Array.from({ length: sampleCount + 1 }, (_, i) =>
+    Math.round((i * intervals) / sampleCount),
+  ).filter((value, index, values) =>
+    (index === 0 || value !== values[index - 1])
+    // Zero is modeled as a dry initial state below. Other prefixes must remain
+    // valid ScenarioInputs, whose supported minimum duration is 0.1 hours.
+    && (value === 0 || inputs.stormDurationHours * value / intervals >= 0.1 - 1e-12),
+  );
+
+  return indices.map((index) => {
+    const elapsedHours = inputs.stormDurationHours * index / intervals;
+    if (index === 0) {
+      return {
+        elapsedHours: 0,
+        metrics: simulateScenario(cells, {
+          ...inputs,
+          rainfallMm: 0,
+          rainfallSeriesMm: undefined,
+        }).metrics,
+      };
+    }
+
+    const rainfallSeriesMm = bins?.slice(0, index);
+    const rainfallMm = rainfallSeriesMm
+      ? rainfallSeriesMm.reduce((sum, value) => sum + value, 0)
+      : inputs.rainfallMm * index / intervals;
+    return {
+      elapsedHours,
+      metrics: simulateScenario(cells, {
+        ...inputs,
+        rainfallMm,
+        stormDurationHours: elapsedHours,
+        rainfallSeriesMm,
+      }).metrics,
+    };
+  });
 }

@@ -1,4 +1,6 @@
-import { Droplets, Gauge, Sprout, ThermometerSun, Trees } from "lucide-react";
+import { useId, useState } from "react";
+import { Download, Droplets, Gauge, Sprout, ThermometerSun, Trees } from "lucide-react";
+import type { ScenarioTimelinePoint } from "../lib/ecotwin/simulation";
 import type { EcoMetrics } from "../lib/ecotwin/types";
 
 function signed(value: number, suffix: string) {
@@ -9,9 +11,13 @@ function signed(value: number, suffix: string) {
 export function MetricsPanel({
   current,
   baseline,
+  currentTimeline,
+  baselineTimeline,
 }: {
   current: EcoMetrics;
   baseline: EcoMetrics;
+  currentTimeline: ScenarioTimelinePoint[];
+  baselineTimeline: ScenarioTimelinePoint[];
 }) {
   const temperatureDelta =
     current.averageTemperature - baseline.averageTemperature;
@@ -111,6 +117,7 @@ export function MetricsPanel({
           </strong>
         </div>
       </div>
+      <MetricsTimeline current={currentTimeline} baseline={baselineTimeline} />
       <details className="model-details">
         <summary>Where the rain goes</summary>
         <p>Volumes at the end of the event. Stored water may drain later; roof drainage is included in runoff.</p>
@@ -128,5 +135,104 @@ export function MetricsPanel({
         <p>Water balance error: {Math.abs(current.waterBalanceError).toExponential(1)} m³. Heat balance error: {current.maxEnergyBalanceError.toExponential(1)} W/m². These check the calculations, not site accuracy.</p>
       </details>
     </aside>
+  );
+}
+
+type TimelineMetric = "totalRunoff" | "totalInfiltration" | "totalStored";
+const TIMELINE_METRICS: { key: TimelineMetric; label: string; shortLabel: string }[] = [
+  { key: "totalRunoff", label: "Cumulative runoff", shortLabel: "Runoff" },
+  { key: "totalInfiltration", label: "Cumulative rain entering soil", shortLabel: "Into soil" },
+  { key: "totalStored", label: "Water still stored", shortLabel: "Stored" },
+];
+
+function MetricsTimeline({ current, baseline }: {
+  current: ScenarioTimelinePoint[];
+  baseline: ScenarioTimelinePoint[];
+}) {
+  const [metric, setMetric] = useState<TimelineMetric>("totalRunoff");
+  const chartId = useId();
+  const definition = TIMELINE_METRICS.find((item) => item.key === metric)!;
+  const width = 252, height = 116, left = 4, right = 4, top = 8, bottom = 20;
+  const duration = current.at(-1)?.elapsedHours || 1;
+  const maximum = Math.max(1, ...current.map((point) => point.metrics[metric]), ...baseline.map((point) => point.metrics[metric]));
+  const path = (points: ScenarioTimelinePoint[]) => points.map((point, index) => {
+    const x = left + point.elapsedHours / duration * (width - left - right);
+    const y = top + (1 - point.metrics[metric] / maximum) * (height - top - bottom);
+    return `${index ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  const currentEnd = current.at(-1)?.metrics[metric] ?? 0;
+  const baselineEnd = baseline.at(-1)?.metrics[metric] ?? 0;
+
+  function downloadResults() {
+    const rows = current.map((point, index) => {
+      const base = baseline[index]?.metrics ?? baseline.at(-1)!.metrics;
+      const value = point.metrics;
+      return [point.elapsedHours, value.totalRainfall, value.totalRunoff, base.totalRunoff,
+        base.totalRunoff - value.totalRunoff, value.totalInfiltration, base.totalInfiltration,
+        value.totalStored, base.totalStored];
+    });
+    const csv = [
+      ["elapsed_hours", "rainfall_m3", "scenario_runoff_m3", "baseline_runoff_m3", "avoided_runoff_m3",
+        "scenario_infiltration_m3", "baseline_infiltration_m3", "scenario_stored_m3", "baseline_stored_m3"],
+      ...rows,
+    ].map((row) => row.map((value) => typeof value === "number" ? value.toFixed(3) : value).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "ecotwin-scenario-over-time.csv";
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  return (
+    <section className="timeline-block" aria-labelledby={`${chartId}-title`}>
+      <div className="timeline-heading">
+        <div>
+          <span className="panel-kicker">During the storm</span>
+          <strong id={`${chartId}-title`}>{definition.label}</strong>
+        </div>
+        <button type="button" className="timeline-download" onClick={downloadResults} title="Download all time-series results as CSV">
+          <Download size={14} /> CSV
+        </button>
+      </div>
+      <div className="timeline-tabs" aria-label="Chart metric">
+        {TIMELINE_METRICS.map((item) => (
+          <button type="button" key={item.key} className={metric === item.key ? "is-active" : ""}
+            aria-pressed={metric === item.key} onClick={() => setMetric(item.key)}>{item.shortLabel}</button>
+        ))}
+      </div>
+      <svg className="timeline-chart" viewBox={`0 0 ${width} ${height}`} role="img"
+        aria-label={`${definition.label}: scenario ${currentEnd.toFixed(1)} cubic metres, baseline ${baselineEnd.toFixed(1)} cubic metres after ${duration.toFixed(1)} hours`}>
+        <defs>
+          <linearGradient id={`${chartId}-area`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#64a5ff" stopOpacity=".28" />
+            <stop offset="1" stopColor="#64a5ff" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        {[0, .5, 1].map((fraction) => <line key={fraction} className="timeline-gridline" x1={left} x2={width - right}
+          y1={top + fraction * (height - top - bottom)} y2={top + fraction * (height - top - bottom)} />)}
+        <path className="timeline-area" d={`${path(current)} L${width - right},${height - bottom} L${left},${height - bottom} Z`} fill={`url(#${chartId}-area)`} />
+        <path className="timeline-baseline-line" d={path(baseline)} />
+        <path className="timeline-scenario-line" d={path(current)} />
+        <text x={left} y={height - 5}>0h</text>
+        <text x={width - right} y={height - 5} textAnchor="end">{duration.toFixed(duration < 10 ? 1 : 0)}h</text>
+        <text x={width - right} y={top + 9} textAnchor="end">{maximum.toFixed(maximum < 10 ? 1 : 0)} m³</text>
+      </svg>
+      <div className="timeline-legend">
+        <span><i className="scenario" />Scenario <strong>{currentEnd.toFixed(1)} m³</strong></span>
+        <span><i className="baseline" />Baseline <strong>{baselineEnd.toFixed(1)} m³</strong></span>
+      </div>
+      <details className="timeline-results">
+        <summary>View results over time</summary>
+        <div className="timeline-result-header"><span>Time</span><span>Rain</span><span>{definition.shortLabel}</span></div>
+        {current.map((point, index) => (
+          <div className="timeline-result-row" key={point.elapsedHours}>
+            <span>{point.elapsedHours.toFixed(point.elapsedHours < 10 ? 1 : 0)}h</span>
+            <span>{point.metrics.totalRainfall.toFixed(1)}</span>
+            <span>{point.metrics[metric].toFixed(1)} m³ <small>({(baseline[index]?.metrics[metric] ?? 0).toFixed(1)} base)</small></span>
+          </div>
+        ))}
+      </details>
+    </section>
   );
 }

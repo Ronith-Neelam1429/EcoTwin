@@ -4,7 +4,7 @@ import { SURFACE_PARAMETERS } from "../src/lib/ecotwin/cellProperties";
 import { greenAmptIncrement, simulateStorm } from "../src/lib/ecotwin/hydrology";
 import { solveSurfaceHeat } from "../src/lib/ecotwin/thermal";
 import { DEFAULT_SCENARIO, validateScenario } from "../src/lib/ecotwin/scenario";
-import { calculateCellEnvironment, simulateScenario } from "../src/lib/ecotwin/simulation";
+import { calculateCellEnvironment, simulateScenario, simulateScenarioTimeline } from "../src/lib/ecotwin/simulation";
 import type { EcoCell, SurfaceType } from "../src/lib/ecotwin/types";
 
 const close = (a: number, b: number, tolerance = 1e-8) => assert.ok(Math.abs(a - b) < tolerance, `${a} differs from ${b}`);
@@ -153,4 +153,40 @@ test("pavement intake and aggregate capacity are distinct limits during intense 
     rainfallMm: 50, stormDurationHours: 0.1, soilConductivityMmH: 0 });
   // 100 mm/h enters the aggregate for 0.1 h; only 1 mm can stay on the surface.
   close(w.storedMm, 11); close(w.runoffMm, 39); close(w.infiltrationMm, 0);
+});
+
+test("scenario timeline starts dry, ends at the scenario result, and is cumulative", () => {
+  const cells = [cell("asphalt")];
+  const inputs = { ...DEFAULT_SCENARIO, rainfallMm: 48, stormDurationHours: 4 };
+  const timeline = simulateScenarioTimeline(cells, inputs, 8);
+  assert.equal(timeline.length, 9);
+  close(timeline[0].elapsedHours, 0);
+  close(timeline[0].metrics.totalRunoff, 0);
+  close(timeline.at(-1)!.metrics.totalRunoff, simulateScenario(cells, inputs).metrics.totalRunoff);
+  for (let i = 1; i < timeline.length; i++) {
+    assert.ok(timeline[i].metrics.totalRainfall >= timeline[i - 1].metrics.totalRainfall);
+    assert.ok(timeline[i].metrics.totalRunoff >= timeline[i - 1].metrics.totalRunoff);
+  }
+});
+
+test("scenario timeline preserves loaded rainfall bin boundaries", () => {
+  const inputs = { ...DEFAULT_SCENARIO, rainfallMm: 30, stormDurationHours: 3, rainfallSeriesMm: [0, 20, 10] };
+  const timeline = simulateScenarioTimeline([cell("asphalt")], inputs, 24);
+  assert.deepEqual(timeline.map((point) => point.elapsedHours), [0, 1, 2, 3]);
+  assert.deepEqual(timeline.map((point) => point.metrics.totalRainfall), [0, 0, 2, 3]);
+});
+
+test("scenario timeline does not create invalid sub-0.1-hour scenario prefixes", () => {
+  const twoHour = simulateScenarioTimeline([cell("grass")], DEFAULT_SCENARIO, 24);
+  assert.equal(twoHour[0].elapsedHours, 0);
+  assert.ok(twoHour[1].elapsedHours >= 0.1);
+  close(twoHour.at(-1)!.elapsedHours, 2);
+
+  const shortest = simulateScenarioTimeline([cell("grass")], {
+    ...DEFAULT_SCENARIO,
+    stormDurationHours: 0.1,
+  });
+  assert.equal(shortest.length, 2);
+  close(shortest[0].elapsedHours, 0);
+  close(shortest[1].elapsedHours, 0.1);
 });

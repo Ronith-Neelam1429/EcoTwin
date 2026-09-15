@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Compass, MapPin } from "lucide-react";
 import { applyIntervention } from "../lib/ecotwin/applyIntervention";
 import { loadNeighborhood, type Neighborhood } from "../lib/ecotwin/geography";
-import { simulateScenario } from "../lib/ecotwin/simulation";
+import { simulateScenario, simulateScenarioTimeline } from "../lib/ecotwin/simulation";
 import type {
   EcoCell,
   InterventionTool,
@@ -121,6 +121,8 @@ function LoadedTwin({
   }, [location, weatherAttempt]);
   const baselineRun = useMemo(() => simulateScenario(baseline, inputs), [baseline, inputs]);
   const currentRun = useMemo(() => simulateScenario(cells, inputs), [cells, inputs]);
+  const baselineTimeline = useMemo(() => simulateScenarioTimeline(baseline, inputs), [baseline, inputs]);
+  const currentTimeline = useMemo(() => simulateScenarioTimeline(cells, inputs), [cells, inputs]);
 
   function updateCell(id: string) {
     const cell = cells.find((c) => c.id === id);
@@ -224,7 +226,8 @@ function LoadedTwin({
             </div>
           )}
         </div>
-        <MetricsPanel current={currentRun.metrics} baseline={baselineRun.metrics} />
+        <MetricsPanel current={currentRun.metrics} baseline={baselineRun.metrics}
+          currentTimeline={currentTimeline} baselineTimeline={baselineTimeline} />
       </div>
     </section>
   );
