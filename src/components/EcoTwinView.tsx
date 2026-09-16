@@ -273,7 +273,10 @@ function LoadedTwin({
             <strong>{neighborhood.buildings} buildings</strong>
             <span>{Math.round(unknownAreaFraction * 100)}% unmapped</span>
             {neighborhood.vegetationDetection && (
-              <span>{Math.round(neighborhood.vegetationDetection.areaM2).toLocaleString()} m² satellite greenery</span>
+              <span>
+                {Math.round(neighborhood.vegetationDetection.areaM2).toLocaleString()} m² satellite greenery
+                {neighborhood.vegetationDetection.treeCells > 0 && ` · ${neighborhood.vegetationDetection.treeCells} existing trees`}
+              </span>
             )}
             {neighborhood.vegetationDetectionError && (
               <span title={neighborhood.vegetationDetectionError}>Satellite greenery unavailable</span>

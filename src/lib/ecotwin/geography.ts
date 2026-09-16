@@ -101,6 +101,46 @@ function circlePolygon([x, z]: Pair, radius: number, sides = 32): MultiPolygon {
   return [[ring]];
 }
 
+function stableFraction(value: string) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0) / 4294967296;
+}
+
+/** Creates deterministic display trees across mapped woodland/tree polygons. */
+export function treePointsForAreas(features: AreaFeature[], existing: Neighborhood["trees"], boundary: MultiPolygon, limit = 1200) {
+  const result: Neighborhood["trees"] = [];
+  const spacing = 0.9; // approximately one mature crown every nine metres
+  for (const feature of features.filter((candidate) => candidate.surface === "tree")) {
+    for (let polygonIndex = 0; polygonIndex < feature.polygons.length; polygonIndex++) {
+      const polygon = feature.polygons[polygonIndex];
+      const points = polygon[0];
+      if (!points.length) continue;
+      const minX = Math.min(...points.map(([x]) => x)), maxX = Math.max(...points.map(([x]) => x));
+      const minZ = Math.min(...points.map(([, z]) => z)), maxZ = Math.max(...points.map(([, z]) => z));
+      let row = 0;
+      for (let baseZ = minZ + spacing / 2; baseZ <= maxZ; baseZ += spacing, row++) {
+        const rowOffset = row % 2 ? spacing / 2 : 0;
+        for (let baseX = minX + spacing / 2 - rowOffset; baseX <= maxX; baseX += spacing) {
+          const key = `${feature.id}-${polygonIndex}-${row}-${Math.round((baseX - minX) / spacing)}`;
+          const point: Pair = [
+            baseX + (stableFraction(`${key}-x`) - 0.5) * 0.24,
+            baseZ + (stableFraction(`${key}-z`) - 0.5) * 0.24,
+          ];
+          if (!contains(point, [polygon]) || !contains(point, boundary)) continue;
+          if ([...existing, ...result].some((tree) => Math.hypot(tree.point[0] - point[0], tree.point[1] - point[1]) < 0.45)) continue;
+          result.push({ id: `area-tree-${key}`, point });
+          if (result.length >= limit) return result;
+        }
+      }
+    }
+  }
+  return result;
+}
+
 export function cellPolygon(row: number, col: number, gridSize = GRID_SIZE): Polygon {
   const halfSize = gridSize / 2;
   const x = col - halfSize, z = row - halfSize;
@@ -387,8 +427,10 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
     return { id: `${row}-${col}`, row, col, surfaceType, baselineSurfaceType: surfaceType, elevation: 0, coverage, buildingId, ...calculateCellEnvironment(surfaceType) };
   }).filter((cell): cell is EcoCell => cell !== null);
   const buildings = features.filter((f) => f.surface === "building");
+  const areaTrees = treePointsForAreas(features, trees, boundary).filter(({ point }) =>
+    baseline.find((cell) => cell.id === cellAt(point[0], point[1], gridSize))?.surfaceType === "tree");
   return {
-    features, trees, baseline, buildings: buildings.length, roads, gridSize, boundary,
+    features, trees: [...trees, ...areaTrees], baseline, buildings: buildings.length, roads, gridSize, boundary,
     culDeSacs: features.filter((feature) => feature.kind === "cul_de_sac").length,
     parkingLots: features.filter((feature) => feature.kind === "parking_lot").length,
     mappedParkingSpaces: features.filter((feature) => feature.kind === "parking_space").length,

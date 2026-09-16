@@ -30,7 +30,7 @@ VITE_GOOGLE_MAPS_API_KEY=your_key_here
 
 Restart the development server after changing the environment file. Restrict the key to the Maps JavaScript API, Places API, Maps Static API, and the web origins that should be allowed to use it.
 
-The map includes address/place autocomplete and interactive Street View. Street View is provided by the Maps JavaScript API and does not require a separate Street View Static API key. When a twin is created, EcoTwin requests a session-only Static Maps satellite image and analyzes it locally with a conservative RGB vegetation classifier. The image is not written to disk or retained by EcoTwin.
+The map includes address/place autocomplete and interactive Street View. Street View is provided by the Maps JavaScript API and does not require a separate Street View Static API key. When a twin is created, EcoTwin requests a session-only Static Maps satellite image and analyzes it locally with a conservative RGB vegetation classifier. Darker, textured green cover is treated as tree canopy and receives an existing-tree model; brighter, smoother cover is treated as grass. The image is not written to disk or retained by EcoTwin.
 
 ## EcoTwin simulation
 

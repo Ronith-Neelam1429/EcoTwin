@@ -288,6 +288,69 @@ function Tree({ x, z, color, onClick }: { x: number; z: number; color: string; o
   );
 }
 
+function ExistingTrees({ trees, cells, baselineById, gridSize, mode, rainfallMm, onSelect }: {
+  trees: Neighborhood["trees"];
+  cells: EcoCell[];
+  baselineById: Map<string, EcoCell>;
+  gridSize: number;
+  mode: ViewMode;
+  rainfallMm: number;
+  onSelect: (event: ThreeEvent<MouseEvent>, id: string) => void;
+}) {
+  const trunks = useRef<THREE.InstancedMesh>(null);
+  const canopies = useRef<THREE.InstancedMesh>(null);
+  const visible = useMemo(() => {
+    const cellById = new Map(cells.map((cell) => [cell.id, cell]));
+    return trees.flatMap((tree) => {
+      const id = cellAt(...tree.point, gridSize);
+      const cell = cellById.get(id);
+      return cell?.surfaceType === "tree"
+        ? [{ ...tree, cellId: id, color: colorFor(cell, baselineById.get(id), mode, rainfallMm) }]
+        : [];
+    });
+  }, [baselineById, cells, gridSize, mode, rainfallMm, trees]);
+  useLayoutEffect(() => {
+    if (!trunks.current || !canopies.current) return;
+    const matrix = new THREE.Matrix4();
+    const rotation = new THREE.Quaternion();
+    for (let index = 0; index < visible.length; index++) {
+      const tree = visible[index];
+      matrix.compose(
+        new THREE.Vector3(tree.point[0], TREE_HEIGHT * 0.28, tree.point[1]),
+        rotation,
+        new THREE.Vector3(0.055, TREE_HEIGHT * 0.56, 0.055),
+      );
+      trunks.current.setMatrixAt(index, matrix);
+      matrix.compose(
+        new THREE.Vector3(tree.point[0], TREE_HEIGHT * 0.7, tree.point[1]),
+        rotation,
+        new THREE.Vector3(TREE_CANOPY_DIAMETER / 2, TREE_CANOPY_DIAMETER * 0.375, TREE_CANOPY_DIAMETER / 2),
+      );
+      canopies.current.setMatrixAt(index, matrix);
+      canopies.current.setColorAt(index, new THREE.Color(tree.color));
+    }
+    trunks.current.instanceMatrix.needsUpdate = true;
+    canopies.current.instanceMatrix.needsUpdate = true;
+    if (canopies.current.instanceColor) canopies.current.instanceColor.needsUpdate = true;
+  }, [visible]);
+  const selectInstance = (event: ThreeEvent<MouseEvent>) => {
+    if (event.instanceId === undefined) return;
+    const tree = visible[event.instanceId];
+    if (tree) onSelect(event, tree.cellId);
+  };
+  if (!visible.length) return null;
+  return <>
+    <instancedMesh ref={trunks} args={[undefined, undefined, visible.length]} castShadow onClick={selectInstance}>
+      <cylinderGeometry args={[1, 1, 1, 8]} />
+      <meshStandardMaterial color="#79583b" roughness={1} />
+    </instancedMesh>
+    <instancedMesh ref={canopies} args={[undefined, undefined, visible.length]} castShadow receiveShadow onClick={selectInstance}>
+      <icosahedronGeometry args={[1, 2]} />
+      <meshStandardMaterial vertexColors roughness={0.92} />
+    </instancedMesh>
+  </>;
+}
+
 function CellSurface({ cell, boundary, gridSize, color, y, inset, onClick }: {
   cell: EcoCell; boundary: MultiPolygon; gridSize: number; color: string; y: number; inset: boolean;
   onClick: (event: ThreeEvent<MouseEvent>) => void;
@@ -520,9 +583,8 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
         {neighborhood.features.filter((f) => f.surface === "building").map((feature) => (
           <Building key={feature.id} feature={feature} cells={cells} baselineById={baselineById} gridSize={gridSize} mode={viewMode} tool={selectedTool} onSelect={select} rainfallMm={rainfallMm} />
         ))}
-        {neighborhood.trees.filter((t) => cells.find((c) => c.id === cellAt(...t.point, gridSize))?.surfaceType === "tree").map((tree) => (
-          <Tree key={tree.id} x={tree.point[0]} z={tree.point[1]} color={colorFor(cells.find((c) => c.id === cellAt(...tree.point, gridSize))!, baselineById.get(cellAt(...tree.point, gridSize)), viewMode, rainfallMm)} onClick={(e) => clickCell(e, cellAt(...tree.point, gridSize))} />
-        ))}
+        <ExistingTrees trees={neighborhood.trees} cells={cells} baselineById={baselineById} gridSize={gridSize}
+          mode={viewMode} rainfallMm={rainfallMm} onSelect={clickCell} />
         <mesh userData={{ captureHidden: true }} position={[0, 0.08, 0]} rotation={[-Math.PI / 2, 0, 0]}><ringGeometry args={[0.19, 0.27, 32]} /><meshBasicMaterial color="#2f6fed" /></mesh>
         <Html position={[0, 0.4, -halfSize - 0.8]} center><span className="north-label">↑ N</span></Html>
         <OrbitControls makeDefault enableDamping minDistance={Math.max(3, gridSize / 6)} maxDistance={gridSize * 2.5} maxPolarAngle={Math.PI / 2.1} />

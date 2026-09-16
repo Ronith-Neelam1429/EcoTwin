@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildingHeight, cellAt, clip, contains, neighborhoodQuery, parseMeters, parseNeighborhood, project, roadWidthMeters, studyBoundary } from "../src/lib/ecotwin/geography";
+import { buildingHeight, cellAt, clip, contains, neighborhoodQuery, parseMeters, parseNeighborhood, project, roadWidthMeters, studyBoundary, treePointsForAreas } from "../src/lib/ecotwin/geography";
 import { applyIntervention } from "../src/lib/ecotwin/applyIntervention";
 import { tileTags } from "../src/lib/ecotwin/vectorSource";
 import { calculateMetrics } from "../src/lib/ecotwin/simulation";
-import { applyDetectedVegetation, isVegetationPixel } from "../src/lib/ecotwin/googleVegetation";
+import { applyDetectedVegetation, isVegetationPixel, vegetationSurface } from "../src/lib/ecotwin/googleVegetation";
 import type { TwinLocation } from "../src/lib/ecotwin/types";
 
 const origin: TwinLocation = { lat: 0, lng: 0, heading: 90, pitch: 10, radiusMeters: 150 };
@@ -20,6 +20,10 @@ const turningCircle = { type: "node", id: 8, ...point(0, 40), tags: { highway: "
 const parkingLot = {
   type: "way", id: 9, nodes: [9, 10, 11, 12, 9], tags: { amenity: "parking" },
   geometry: [point(-30, 20), point(30, 20), point(30, 60), point(-30, 60), point(-30, 20)],
+};
+const woodland = {
+  type: "way", id: 10, nodes: [20, 21, 22, 23, 20], tags: { natural: "wood" },
+  geometry: [point(40, 40), point(80, 40), point(80, 80), point(40, 80), point(40, 40)],
 };
 
 test("metric projection preserves east, north, distance, and exact origin", () => {
@@ -39,6 +43,22 @@ test("cell lookup follows a resized study-area grid", () => {
 test("vector tree points are retained from POI tiles", () => {
   assert.deepEqual(tileTags("poi", { class: "tree" }), { natural: "tree" });
   assert.deepEqual(tileTags("poi", { subclass: "tree" }), { natural: "tree" });
+});
+
+test("mapped tree areas receive spaced existing-tree model points", () => {
+  const n = parseNeighborhood({ elements: [woodland] }, origin);
+  const area = n.features.find((feature) => feature.id === "way/10")!;
+  const trees = n.trees.filter((tree) => tree.id.startsWith("area-tree-way/10"));
+  assert.ok(trees.length > 4);
+  assert.ok(trees.every((tree) => contains(tree.point, area.polygons)));
+  assert.ok(trees.every((tree) => n.baseline.find((cell) => cell.id === cellAt(...tree.point))?.surfaceType === "tree"));
+});
+
+test("tree-area sampling avoids duplicate explicit tree points", () => {
+  const feature = { id: "wood", polygons: [[[[0, 0], [2, 0], [2, 2], [0, 2], [0, 0]]]], surface: "tree", kind: "landscape", height: 0, heightSource: "assumed" } as const;
+  const existing = [{ id: "mapped-tree", point: [0.45, 0.45] as [number, number] }];
+  const generated = treePointsForAreas([feature], existing, feature.polygons);
+  assert.ok(generated.every((tree) => Math.hypot(tree.point[0] - 0.45, tree.point[1] - 0.45) >= 0.45));
 });
 
 test("courtyards remain empty and polygon edges clip to 300 metres", () => {
@@ -121,10 +141,16 @@ test("satellite classifier recognizes vegetation colors conservatively", () => {
   assert.equal(isVegetationPixel(245, 255, 245), false);
 });
 
+test("satellite greenery separates smooth lawn from dark or textured tree canopy", () => {
+  assert.equal(vegetationSurface({ fraction: 0.7, meanLuminance: 142, luminanceDeviation: 8 }), "grass");
+  assert.equal(vegetationSurface({ fraction: 0.7, meanLuminance: 88, luminanceDeviation: 12 }), "tree");
+  assert.equal(vegetationSurface({ fraction: 0.7, meanLuminance: 125, luminanceDeviation: 24 }), "tree");
+});
+
 test("satellite vegetation becomes baseline green cover rather than an intervention", () => {
   const n = parseNeighborhood({ elements: [] }, origin);
   const selected = n.baseline.find((cell) => cell.id === "15-15")!;
-  const enhanced = applyDetectedVegetation(n, [selected]);
+  const enhanced = applyDetectedVegetation(n, [{ cell: selected, surface: "grass" }]);
   const detected = enhanced.baseline.find((cell) => cell.id === selected.id)!;
   assert.equal(detected.surfaceType, "grass");
   assert.equal(detected.baselineSurfaceType, "grass");
@@ -136,10 +162,23 @@ test("satellite vegetation becomes baseline green cover rather than an intervent
 test("satellite green detection cannot replace mapped pavement", () => {
   const n = parseNeighborhood({ elements: [road] }, origin);
   const paved = n.baseline.find((cell) => cell.surfaceType === "asphalt")!;
-  const enhanced = applyDetectedVegetation(n, [paved]);
+  const enhanced = applyDetectedVegetation(n, [{ cell: paved, surface: "tree" }]);
   assert.equal(enhanced.baseline.find((cell) => cell.id === paved.id)?.surfaceType, "asphalt");
   assert.equal(enhanced.vegetationDetection?.cells, 0);
   assert.ok(!enhanced.features.some((feature) => feature.id === `google-vegetation-${paved.id}`));
+});
+
+test("detected tree canopy adds an existing tree model and tree physics", () => {
+  const n = parseNeighborhood({ elements: [] }, origin);
+  const selected = n.baseline.find((cell) => cell.id === "15-15")!;
+  const enhanced = applyDetectedVegetation(n, [{ cell: selected, surface: "tree" }]);
+  const treeCell = enhanced.baseline.find((cell) => cell.id === selected.id)!;
+  assert.equal(treeCell.surfaceType, "tree");
+  assert.equal(treeCell.baselineSurfaceType, "tree");
+  assert.ok(treeCell.canopy > 0);
+  assert.deepEqual(enhanced.trees.find((tree) => tree.id === `google-tree-${selected.id}`)?.point, [0.5, 0.5]);
+  assert.equal(enhanced.vegetationDetection?.treeCells, 1);
+  assert.equal(calculateMetrics(enhanced.baseline).interventions, 0);
 });
 
 test("a custom border clips the modeled cells and preserves fractional edge area", () => {

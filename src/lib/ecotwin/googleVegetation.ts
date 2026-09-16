@@ -8,8 +8,20 @@ const MIN_VEGETATION_FRACTION = 0.28;
 
 export type VegetationDetection = {
   cells: number;
+  treeCells: number;
   areaM2: number;
   source: "Google Maps satellite";
+};
+
+export type DetectedVegetationCell = {
+  cell: EcoCell;
+  surface: "grass" | "tree";
+};
+
+export type VegetationSample = {
+  fraction: number;
+  meanLuminance: number;
+  luminanceDeviation: number;
 };
 
 export type VegetationNeighborhood = Neighborhood & {
@@ -32,10 +44,16 @@ export function isVegetationPixel(red: number, green: number, blue: number, alph
   return hue >= 48 && hue <= 172 && saturation >= 0.14 && excessGreen >= 12;
 }
 
-function sampledVegetationFraction(cell: EcoCell, gridSize: number, image: ImageData, metersPerPixel: number, boundary: Neighborhood["boundary"]) {
+export function vegetationSurface(sample: VegetationSample): "grass" | "tree" {
+  // Tree crowns are normally darker and more locally varied than lawns because
+  // leaves, gaps and cast shadows produce a mottled canopy texture.
+  return sample.meanLuminance < 102 || sample.luminanceDeviation >= 19 ? "tree" : "grass";
+}
+
+function sampleVegetation(cell: EcoCell, gridSize: number, image: ImageData, metersPerPixel: number, boundary: Neighborhood["boundary"]): VegetationSample {
   const sceneX = cell.col - gridSize / 2 + 0.5;
   const sceneZ = cell.row - gridSize / 2 + 0.5;
-  let vegetation = 0, samples = 0;
+  let vegetation = 0, samples = 0, luminanceTotal = 0, luminanceSquaredTotal = 0;
   for (let sampleRow = 0; sampleRow < SAMPLE_GRID; sampleRow++) {
     for (let sampleCol = 0; sampleCol < SAMPLE_GRID; sampleCol++) {
       const x = sceneX + (sampleCol + 0.5) / SAMPLE_GRID - 0.5;
@@ -46,31 +64,47 @@ function sampledVegetationFraction(cell: EcoCell, gridSize: number, image: Image
       if (pixelX < 0 || pixelY < 0 || pixelX >= image.width || pixelY >= image.height) continue;
       const offset = (pixelY * image.width + pixelX) * 4;
       samples++;
-      if (isVegetationPixel(image.data[offset], image.data[offset + 1], image.data[offset + 2], image.data[offset + 3])) vegetation++;
+      const red = image.data[offset], green = image.data[offset + 1], blue = image.data[offset + 2];
+      if (isVegetationPixel(red, green, blue, image.data[offset + 3])) {
+        vegetation++;
+        const luminance = red * 0.2126 + green * 0.7152 + blue * 0.0722;
+        luminanceTotal += luminance;
+        luminanceSquaredTotal += luminance ** 2;
+      }
     }
   }
-  return samples ? vegetation / samples : 0;
+  if (!samples || !vegetation) return { fraction: 0, meanLuminance: 0, luminanceDeviation: 0 };
+  const meanLuminance = luminanceTotal / vegetation;
+  return {
+    fraction: vegetation / samples,
+    meanLuminance,
+    luminanceDeviation: Math.sqrt(Math.max(0, luminanceSquaredTotal / vegetation - meanLuminance ** 2)),
+  };
 }
 
 function detectCells(neighborhood: Neighborhood, image: ImageData, metersPerPixel: number) {
-  return neighborhood.baseline.filter((cell) =>
-    !cell.buildingId
-    && cell.surfaceType === "unknown"
-    && sampledVegetationFraction(cell, neighborhood.gridSize, image, metersPerPixel, neighborhood.boundary) >= MIN_VEGETATION_FRACTION);
+  return neighborhood.baseline.flatMap((cell): DetectedVegetationCell[] => {
+    if (cell.buildingId || cell.surfaceType !== "unknown") return [];
+    const sample = sampleVegetation(cell, neighborhood.gridSize, image, metersPerPixel, neighborhood.boundary);
+    return sample.fraction >= MIN_VEGETATION_FRACTION ? [{ cell, surface: vegetationSurface(sample) }] : [];
+  });
 }
 
-export function applyDetectedVegetation(neighborhood: Neighborhood, detected: EcoCell[]): VegetationNeighborhood {
-  const eligible = detected.filter((cell) => !cell.buildingId && cell.surfaceType === "unknown");
+export function applyDetectedVegetation(neighborhood: Neighborhood, detected: DetectedVegetationCell[]): VegetationNeighborhood {
+  const eligible = detected.filter(({ cell }) => !cell.buildingId && cell.surfaceType === "unknown");
   if (!eligible.length)
-    return { ...neighborhood, vegetationDetection: { cells: 0, areaM2: 0, source: "Google Maps satellite" } };
-  const ids = new Set(eligible.map((cell) => cell.id));
-  const baseline = neighborhood.baseline.map((cell) => ids.has(cell.id)
-    ? { ...cell, surfaceType: "grass" as const, baselineSurfaceType: "grass" as const, ...calculateCellEnvironment("grass") }
-    : cell);
+    return { ...neighborhood, vegetationDetection: { cells: 0, treeCells: 0, areaM2: 0, source: "Google Maps satellite" } };
+  const detectedById = new Map(eligible.map((item) => [item.cell.id, item.surface]));
+  const baseline = neighborhood.baseline.map((cell) => {
+    const surface = detectedById.get(cell.id);
+    return surface
+      ? { ...cell, surfaceType: surface, baselineSurfaceType: surface, ...calculateCellEnvironment(surface) }
+      : cell;
+  });
   const mappedImpervious = neighborhood.features
     .filter((feature) => feature.surface === "building" || feature.surface === "asphalt")
     .map((feature) => feature.polygons);
-  const features = [...neighborhood.features, ...eligible.flatMap((cell) => {
+  const features = [...neighborhood.features, ...eligible.flatMap(({ cell, surface }) => {
     const clippedCell = polygonClipping.intersection(neighborhood.boundary, cellPolygon(cell.row, cell.col, neighborhood.gridSize));
     const polygons = mappedImpervious.length
       ? polygonClipping.difference(clippedCell, ...mappedImpervious)
@@ -78,7 +112,7 @@ export function applyDetectedVegetation(neighborhood: Neighborhood, detected: Ec
     return polygons.length ? [{
       id: `google-vegetation-${cell.id}`,
       polygons,
-      surface: "grass" as const,
+      surface,
       kind: "landscape" as const,
       height: 0,
       heightSource: "assumed" as const,
@@ -88,10 +122,18 @@ export function applyDetectedVegetation(neighborhood: Neighborhood, detected: Ec
     ...neighborhood,
     baseline,
     features,
+    trees: [
+      ...neighborhood.trees,
+      ...eligible.filter(({ surface }) => surface === "tree").map(({ cell }) => ({
+        id: `google-tree-${cell.id}`,
+        point: [cell.col - neighborhood.gridSize / 2 + 0.5, cell.row - neighborhood.gridSize / 2 + 0.5] as [number, number],
+      })),
+    ],
     unknownCells: baseline.filter((cell) => cell.surfaceType === "unknown").length,
     vegetationDetection: {
       cells: eligible.length,
-      areaM2: eligible.reduce((sum, cell) => sum + cell.coverage * CELL_METERS ** 2, 0),
+      treeCells: eligible.filter(({ surface }) => surface === "tree").length,
+      areaM2: eligible.reduce((sum, { cell }) => sum + cell.coverage * CELL_METERS ** 2, 0),
       source: "Google Maps satellite",
     },
   };
