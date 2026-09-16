@@ -4,10 +4,10 @@ import { createServer } from 'node:http';
 import { realisticViewMiddleware, validateImage, REALISTIC_PROMPT } from '../server/realisticView.ts';
 
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jBf8AAAAASUVORK5CYII=';
-async function endpoint(key: string, upstream: typeof fetch, run: (url: string) => Promise<void>) {
+async function endpoint(key: string, upstream: typeof fetch, run: (url: string) => Promise<void>, provider = 'flux-kontext-pro') {
   const handler = realisticViewMiddleware({
     apiKey: key,
-    endpoint: 'https://vide.cognitiveservices.azure.com/providers/blackforestlabs/v1/flux-kontext-pro?api-version=preview',
+    endpoint: `https://vide.cognitiveservices.azure.com/providers/blackforestlabs/v1/${provider}?api-version=preview`,
     deployment: 'test-image-model',
   }, upstream);
   const server = createServer((req, res) => handler(req, res, () => { res.writeHead(404); res.end(); }));
@@ -23,6 +23,20 @@ test('scene image validation rejects non-images and oversized input', () => {
   assert(validateImage(png).length > 8);
   for (const input of [null, 'https://example.com/image.png', 'data:image/png;base64,aGVsbG8=', png + '!']) assert.throws(() => validateImage(input));
   assert.throws(() => validateImage('data:image/png;base64,' + 'A'.repeat(13 * 1024 * 1024)));
+});
+
+test('FLUX.2 receives the 3D camera and real building as separate references', async () => {
+  const jpeg = 'data:image/jpeg;base64,/9j/2Q==';
+  await endpoint('server-secret', async (url, options) => {
+    assert.equal(url, 'https://vide.cognitiveservices.azure.com/providers/blackforestlabs/v1/flux-2-pro?api-version=preview');
+    const body = JSON.parse(options?.body as string);
+    assert.equal(body.input_image, png.split(',')[1]);
+    assert.equal(body.input_image_2, jpeg.split(',')[1]);
+    return Response.json({ data: [{ b64_json: png.split(',')[1] }] });
+  }, async (url) => {
+    const response = await send(url, { image: png, referenceImage: jpeg, fallbackImage: png });
+    assert.equal(response.status, 200);
+  }, 'flux-2-pro');
 });
 
 test('missing key gives actionable setup without contacting provider', async () => {
@@ -41,7 +55,7 @@ test('valid capture reaches the Flux provider with server credentials and return
     assert.equal(body.model, 'test-image-model');
     assert.equal(body.prompt, REALISTIC_PROMPT);
     assert.equal(body.input_image, png.split(',')[1]);
-    assert.equal(body.aspect_ratio, '16:9');
+    assert.equal(body.aspect_ratio, undefined);
     assert.equal(body.output_format, 'png');
     return Response.json({ data: [{ b64_json: png.split(',')[1] }] });
   }, async (url) => {

@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { realisticViewMiddleware } from "./server/realisticView.ts";
 import { googleSatelliteMiddleware } from "./server/googleSatellite.ts";
+import { googleStreetViewMiddleware } from "./server/googleStreetView.ts";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -15,10 +16,12 @@ export default defineConfig(({ mode }) => {
       name: 'ecotwin-realistic-view',
       configureServer(server) {
         server.middlewares.use(googleSatelliteMiddleware({ apiKey: env.VITE_GOOGLE_MAPS_API_KEY }));
+        server.middlewares.use(googleStreetViewMiddleware({ apiKey: env.VITE_GOOGLE_MAPS_API_KEY }));
         server.middlewares.use(realisticViewMiddleware(realisticOptions));
       },
       configurePreviewServer(server) {
         server.middlewares.use(googleSatelliteMiddleware({ apiKey: env.VITE_GOOGLE_MAPS_API_KEY }));
+        server.middlewares.use(googleStreetViewMiddleware({ apiKey: env.VITE_GOOGLE_MAPS_API_KEY }));
         server.middlewares.use(realisticViewMiddleware(realisticOptions));
       },
     }],

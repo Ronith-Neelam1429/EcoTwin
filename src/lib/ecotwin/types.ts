@@ -50,6 +50,15 @@ export type TwinLocation = {
   lng: number;
   heading: number;
   pitch: number;
+  /** Exact panorama view used when the twin was created from Street View. */
+  streetView?: {
+    panoId: string;
+    lat: number;
+    lng: number;
+    heading: number;
+    pitch: number;
+    fov: number;
+  };
   /** Half the width of the square that contains the study area. */
   radiusMeters: number;
   /** User-drawn study boundary. Omitted for the standard square area. */

@@ -5,7 +5,8 @@ import * as THREE from "three";
 import { Pause, Play } from "lucide-react";
 import polygonClipping, { type MultiPolygon, type Pair } from "polygon-clipping";
 import { SURFACE_COLORS, SURFACE_LABELS } from "../lib/ecotwin/cellProperties";
-import { cellAt, cellPolygon, contains, type Neighborhood, type AreaFeature } from "../lib/ecotwin/geography";
+import { CELL_METERS, cellAt, cellPolygon, contains, type Neighborhood, type AreaFeature } from "../lib/ecotwin/geography";
+import type { VegetationNeighborhood } from "../lib/ecotwin/googleVegetation";
 import type { EcoCell, InterventionTool, TwinLocation, ViewMode } from "../lib/ecotwin/types";
 
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -63,6 +64,23 @@ function ThermalField({ cells, boundary, gridSize, onClick }: {
   useEffect(() => () => texture.dispose(), [texture]);
   return <mesh geometry={geometry} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.032, 0]} onClick={onClick}>
     <meshBasicMaterial map={texture} toneMapped={false} side={THREE.DoubleSide} />
+  </mesh>;
+}
+
+function SatelliteCaptureGround({ reference }: { reference: NonNullable<VegetationNeighborhood["satelliteReference"]> }) {
+  const texture = useMemo(() => {
+    const result = new THREE.TextureLoader().load(reference.image);
+    result.colorSpace = THREE.SRGBColorSpace;
+    result.minFilter = THREE.LinearFilter;
+    result.magFilter = THREE.LinearFilter;
+    return result;
+  }, [reference.image]);
+  useEffect(() => () => texture.dispose(), [texture]);
+  const width = reference.width * reference.metersPerPixel / CELL_METERS;
+  const height = reference.height * reference.metersPerPixel / CELL_METERS;
+  return <mesh visible={false} userData={{ captureOnly: true }} position={[0, 0.021, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+    <planeGeometry args={[width, height]} />
+    <meshBasicMaterial map={texture} toneMapped={false} />
   </mesh>;
 }
 
@@ -493,8 +511,11 @@ function CaptureBridge({ captureRef, viewMode }: { captureRef?: Ref<SceneCapture
   const { gl, scene, camera } = useThree();
   useImperativeHandle(captureRef, () => ({ capture() {
     if (viewMode !== "surface") throw new Error("The surface view is still updating. Please try again.");
-    const hidden: THREE.Object3D[] = [];
-    scene.traverse((object) => { if (object.userData.captureHidden && object.visible) { hidden.push(object); object.visible = false; } });
+    const hidden: THREE.Object3D[] = [], shown: THREE.Object3D[] = [];
+    scene.traverse((object) => {
+      if (object.userData.captureHidden && object.visible) { hidden.push(object); object.visible = false; }
+      if (object.userData.captureOnly && !object.visible) { shown.push(object); object.visible = true; }
+    });
     try {
       gl.render(scene, camera);
       const output = document.createElement('canvas');
@@ -505,13 +526,17 @@ function CaptureBridge({ captureRef, viewMode }: { captureRef?: Ref<SceneCapture
       if (!context) throw new Error('Could not capture the scene. Please retry.');
       context.drawImage(gl.domElement, 0, 0, output.width, output.height);
       return output.toDataURL('image/png');
-    } finally { hidden.forEach((object) => { object.visible = true; }); gl.render(scene, camera); }
+    } finally {
+      hidden.forEach((object) => { object.visible = true; });
+      shown.forEach((object) => { object.visible = false; });
+      gl.render(scene, camera);
+    }
   } }), [gl, scene, camera, viewMode]);
   return null;
 }
 
 export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onCellClick, neighborhood, location, rainfallMm, captureRef }: {
-  captureRef?: Ref<SceneCapture>; rainfallMm: number; cells: EcoCell[]; baselineCells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: Neighborhood; location: TwinLocation;
+  captureRef?: Ref<SceneCapture>; rainfallMm: number; cells: EcoCell[]; baselineCells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: VegetationNeighborhood; location: TwinLocation;
 }) {
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const [pausedMode, setPausedMode] = useState<ViewMode | null>(null);
@@ -532,6 +557,7 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
     <div className="scene-canvas">
       <Canvas shadows frameloop={viewMode === "surface" || !simulationActive ? "demand" : "always"} dpr={[1, 1.5]} camera={{ position: cameraPosition, fov: 48, near: 0.5, far: 300 }}>
         <CaptureBridge captureRef={captureRef} viewMode={viewMode} />
+        {neighborhood.satelliteReference && <SatelliteCaptureGround reference={neighborhood.satelliteReference} />}
         <color attach="background" args={["#b9d4e7"]} />
         <fog attach="fog" args={["#b9d4e7", gridSize * 1.5, gridSize * 4]} />
         <hemisphereLight args={["#e8f2ff", "#6f746d", 0.8]} />

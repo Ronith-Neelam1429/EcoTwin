@@ -21,14 +21,14 @@ npm run dev
 ## Google Maps setup
 
 1. Copy `.env.example` to `.env`.
-2. Enable **Maps JavaScript API**, **Places API**, and **Maps Static API** in a Google Cloud project.
+2. Enable **Maps JavaScript API**, **Places API**, **Maps Static API**, and **Street View Static API** in a Google Cloud project.
 3. Add the browser API key to `.env`:
 
 ```bash
 VITE_GOOGLE_MAPS_API_KEY=your_key_here
 ```
 
-Restart the development server after changing the environment file. Restrict the key to the Maps JavaScript API, Places API, Maps Static API, and the web origins that should be allowed to use it.
+Restart the development server after changing the environment file. Restrict the key to the Maps JavaScript API, Places API, Maps Static API, Street View Static API, and the web origins that should be allowed to use it.
 
 The map includes address/place autocomplete and interactive Street View. Street View is provided by the Maps JavaScript API and does not require a separate Street View Static API key. When a twin is created, EcoTwin requests a session-only Static Maps satellite image and analyzes it locally with a conservative RGB vegetation classifier. Darker, textured green cover is treated as tree canopy and receives an existing-tree model; brighter, smoother cover is treated as grass. The image is not written to disk or retained by EcoTwin.
 
@@ -58,10 +58,10 @@ Checks: `npm test`, `npm run lint`, and `npm run build`.
 
 ## Realistic concept views
 
-Place your interventions, orbit/zoom to the desired composition, then select **Realistic view → Generate realistic view**. The app captures the surface model (even when Heat or Runoff is selected) and sends the PNG to OpenAI's image editing API. Trees and roof patches in the capture guide the photographic concept. Compare it with the source capture, download it, or generate again after edits. Results remain available while switching views in the current session; a changed design is marked as out of date.
+Place your interventions, orbit/zoom to the desired composition, then select **Realistic view → Generate realistic view**. EcoTwin captures the exact current 3D camera with the session-only Google satellite image aligned beneath the model, then requests the exact Street View panorama and camera that were active when the twin was created. The 3D image is the source of truth for camera, geometry, and intervention placement; Street View is the source of truth for the real buildings' roof type, façades, storefronts, and commercial character. Compare the result with the captured 3D angle, download it, or generate again after edits. Results remain available while switching views in the current session; a changed design is marked as out of date.
 
-Set `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_IMAGE_ENDPOINT`, and `AZURE_OPENAI_IMAGE_DEPLOYMENT` in `.env`, then restart `npm run dev`. The endpoint uses Azure's Black Forest Labs provider route (`/providers/blackforestlabs/v1/flux-kontext-pro?api-version=preview`) because it supports reference-image editing even when a resource's OpenAI-compatible Images API route is unavailable. Set the deployment to `FLUX.1-Kontext-pro`. The key stays in the server process and must never have a `VITE_` prefix. Generation uses your Azure credits and requires image-model quota. See the [Azure FLUX image-edit documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/how-to/use-foundry-models-flux).
+Set `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_IMAGE_ENDPOINT`, and `AZURE_OPENAI_IMAGE_DEPLOYMENT` in `.env`, then restart `npm run dev`. For the best building fidelity, use an Azure FLUX.2 pro or flex deployment and its provider route (`/providers/blackforestlabs/v1/flux-2-pro?api-version=preview` or `/providers/blackforestlabs/v1/flux-2-flex?api-version=preview`); EcoTwin then sends the 3D camera capture and Street View as two independent reference images. The existing FLUX.1 Kontext route remains supported and receives a single combined image with Street View as a labeled appearance-only inset, but this fallback is less reliable because FLUX.1 cannot independently condition on both references. Set the deployment name to the model deployed in Azure. The key stays in the server process and must never have a `VITE_` prefix. Generation uses your Azure credits and requires image-model quota. See the [Azure FLUX image-edit documentation](https://learn.microsoft.com/en-us/azure/ai-foundry/foundry-models/how-to/use-foundry-models-flux).
 
-The endpoint is included in both `npm run dev` and `npm run preview`, accepts only local-computer requests, and permits one generation at a time. A static-only deployment cannot generate images. For a public deployment, move the handler behind authenticated server routing with per-user quotas before exposing it. Captures are processed in memory; they are not saved on the server. Cancel stops waiting and aborts the upstream request, but an already-started generation may still incur API charges.
+The endpoint is included in both `npm run dev` and `npm run preview`, accepts only local-computer requests, and permits one generation at a time. A static-only deployment cannot generate images. For a public deployment, move the handler behind authenticated server routing with per-user quotas before exposing it. Satellite-grounded model captures are processed in memory; they are not saved on the server. Cancel stops waiting and aborts the upstream request, but an already-started generation may still incur API charges.
 
-These are AI-generated planning concepts, not actual photographs, verified Street View reconstructions, or precise forecasts. The image model may change details or placement; the editable 3D model and simulation remain the source of truth. Google imagery is not sent to the image service.
+These are AI-generated planning concepts, not actual photographs or precise forecasts. The image model may still change small details; the editable 3D model and simulation remain the source of truth. The temporary satellite and Street View references are fetched only for the current generation and are processed in memory rather than saved by EcoTwin.

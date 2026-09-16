@@ -27,6 +27,13 @@ export type VegetationSample = {
 export type VegetationNeighborhood = Neighborhood & {
   vegetationDetection?: VegetationDetection;
   vegetationDetectionError?: string;
+  /** Session-only Google image aligned to the scene for realistic-view capture. */
+  satelliteReference?: {
+    image: string;
+    width: number;
+    height: number;
+    metersPerPixel: number;
+  };
 };
 
 /** Conservative RGB vegetation test for unlabelled satellite pixels. */
@@ -159,7 +166,15 @@ export async function addGoogleVegetation(location: TwinLocation, neighborhood: 
     if (!context) throw new Error("This browser cannot analyze the satellite image.");
     context.drawImage(bitmap, 0, 0);
     const image = context.getImageData(0, 0, canvas.width, canvas.height);
-    return applyDetectedVegetation(neighborhood, detectCells(neighborhood, image, metersPerPixel));
+    return {
+      ...applyDetectedVegetation(neighborhood, detectCells(neighborhood, image, metersPerPixel)),
+      satelliteReference: {
+        image: canvas.toDataURL("image/jpeg", 0.9),
+        width: canvas.width,
+        height: canvas.height,
+        metersPerPixel,
+      },
+    };
   } finally {
     bitmap.close();
   }

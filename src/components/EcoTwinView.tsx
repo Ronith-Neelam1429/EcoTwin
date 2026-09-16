@@ -229,7 +229,7 @@ function LoadedTwin({
         </div>
         <div className="twin-view-actions">
           <ViewModeToggle value={viewMode} onChange={setViewMode} />
-          <RealisticView revision={cells.map((cell) => cell.surfaceType).join(',')} capture={async () => {
+          <RealisticView location={location} revision={cells.map((cell) => cell.surfaceType).join(',')} capture={async () => {
             flushSync(() => setViewMode("surface"));
             // The Three scene reconciles in its own React root. Let it commit the surface materials.
             await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));

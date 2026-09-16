@@ -1,10 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Connect } from 'vite';
 
-const MAX_BODY = 12 * 1024 * 1024;
+const MAX_IMAGE = 12 * 1024 * 1024;
+const MAX_BODY = 28 * 1024 * 1024;
 const PREFIX = 'data:image/png;base64,';
 export function validateImage(value: unknown): Buffer {
-  if (typeof value !== 'string' || !value.startsWith(PREFIX) || value.length > MAX_BODY)
+  if (typeof value !== 'string' || !value.startsWith(PREFIX) || value.length > MAX_IMAGE)
     throw new Error('A PNG capture of the scene is required.');
   const encoded = value.slice(PREFIX.length);
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new Error('Invalid scene image.');
@@ -14,7 +15,18 @@ export function validateImage(value: unknown): Buffer {
   return bytes;
 }
 
-export const REALISTIC_PROMPT = `Transform this environmental planning 3D model into a photorealistic architectural visualization of the SAME scene. Preserve the exact camera angle, framing, street layout, building footprints, heights, and positions of every visible intervention. Do not redesign the neighborhood. Replace flat materials with plausible real-world facades, asphalt, soil, vegetation, natural daylight and shadows. Raised green tree shapes must become established leafy trees at those exact locations. Green patches on top of buildings must become planted green roofs confined to those patches. Ground rain gardens must become planted infiltration beds, and permeable paving must retain its footprint. Preserve existing greenery and do not add extra trees or roofs elsewhere. Remove selection markers and the model base slab; extend neutral surroundings naturally. No diagrams, labels, borders, text or heat-map colors. This is a proposed future concept, not a reconstruction of an actual photograph.`;
+function validateReferenceImage(value: unknown): Buffer {
+  if (typeof value !== 'string' || value.length > MAX_IMAGE) throw new Error('A building reference image is required.');
+  const match = value.match(/^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match) throw new Error('Invalid building reference image.');
+  const bytes = Buffer.from(match[2], 'base64');
+  const png = bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes.at(-2) === 0xff && bytes.at(-1) === 0xd9;
+  if (!png && !jpeg) throw new Error('Invalid building reference image.');
+  return bytes;
+}
+
+export const REALISTIC_PROMPT = `Create a photorealistic architectural visualization of this exact shopping complex or neighborhood. INPUT IMAGE 1 is the absolute source of truth for the aerial camera, lens, framing, crop, building footprints, roof geometry, streets, parking, and every proposed intervention. Never change that camera or geometry. INPUT IMAGE 2, when supplied separately, is Google Street View of the real property and is the absolute source of truth for existing building identity and appearance: preserve its roof type, roof color, facade colors and materials, parapets, storefront glazing, canopies, architectural rhythm, and recognizable commercial character. If there is instead a small inset labeled REAL BUILDING APPEARANCE ONLY inside image 1, use that inset for the same appearance purpose, remove it completely, and reconstruct the covered background naturally. Do not turn the Street View reference into the output camera. Do not replace the real shopping complex with generic houses, pitched tile roofs, or invented architecture. Apply only the proposed additions from image 1: green patches on roofs become planted green roofs at those exact patches; raised green tree markers become mature trees at those exact locations; rain gardens and permeable paving keep their exact footprints. The aligned satellite ground supplies real site detail. Output one full-frame image with no inset, labels, borders, diagrams, or model styling.`;
 
 type RealisticViewOptions = { apiKey?: string; endpoint?: string; deployment?: string };
 
@@ -22,10 +34,13 @@ function validAzureEndpoint(value?: string) {
   if (!value) return null;
   try {
     const url = new URL(value);
-    const validHost = url.hostname.endsWith('.cognitiveservices.azure.com');
-    const validPath = url.pathname === '/providers/blackforestlabs/v1/flux-kontext-pro';
+    const validHost = url.hostname.endsWith('.cognitiveservices.azure.com') || url.hostname.endsWith('.api.cognitive.microsoft.com');
+    const modelPath = url.pathname.split('/').at(-1);
+    const validPath = ['flux-kontext-pro', 'flux-2-pro', 'flux-2-flex'].includes(modelPath ?? '');
     const validVersion = url.searchParams.get('api-version') === 'preview';
-    return url.protocol === 'https:' && validHost && validPath && validVersion ? url.toString() : null;
+    return url.protocol === 'https:' && validHost && validPath && validVersion
+      ? { url: url.toString(), multiReference: modelPath === 'flux-2-pro' || modelPath === 'flux-2-flex' }
+      : null;
   } catch {
     return null;
   }
@@ -49,7 +64,7 @@ export function realisticViewMiddleware(options: RealisticViewOptions, request: 
     if (req.method !== 'POST') return reply(405, { error: 'Use POST to generate an image.' });
     if (!req.headers['content-type']?.startsWith('application/json')) return reply(415, { error: 'Expected a scene capture.' });
     if (!apiKey || !deployment) return reply(503, { error: 'Realistic views need Azure image settings. Add AZURE_OPENAI_API_KEY and AZURE_OPENAI_IMAGE_DEPLOYMENT to .env, then restart the app.' });
-    if (!endpoint) return reply(503, { error: 'AZURE_OPENAI_IMAGE_ENDPOINT must be the Azure Black Forest Labs flux-kontext-pro provider URL, then restart the app.' });
+    if (!endpoint) return reply(503, { error: 'AZURE_OPENAI_IMAGE_ENDPOINT must be an Azure Black Forest Labs FLUX.1 Kontext or FLUX.2 provider URL, then restart the app.' });
     if (busy) return reply(429, { error: 'An image is already being generated. Please wait before retrying.' });
     busy = true;
     const controller = new AbortController();
@@ -61,20 +76,25 @@ export function realisticViewMiddleware(options: RealisticViewOptions, request: 
       const chunks: Buffer[] = [];
       for await (const chunk of req) {
         length += chunk.length;
-        if (length > MAX_BODY) { reply(413, { error: 'Scene capture is too large. Zoom out or resize the window and retry.' }); return; }
+        if (length > MAX_BODY) { reply(413, { error: 'Scene references are too large. Zoom out or resize the window and retry.' }); return; }
         chunks.push(Buffer.from(chunk));
       }
-      let bytes: Buffer;
-      try { bytes = validateImage(JSON.parse(Buffer.concat(chunks).toString()).image); }
-      catch { reply(400, { error: 'A valid PNG scene capture is required.' }); return; }
-      const response = await request(endpoint, {
+      let bytes: Buffer, referenceBytes: Buffer | undefined, fallbackBytes: Buffer | undefined;
+      try {
+        const payload = JSON.parse(Buffer.concat(chunks).toString()) as { image?: unknown; referenceImage?: unknown; fallbackImage?: unknown };
+        bytes = validateImage(payload.image);
+        if (payload.referenceImage !== undefined) referenceBytes = validateReferenceImage(payload.referenceImage);
+        if (payload.fallbackImage !== undefined) fallbackBytes = validateImage(payload.fallbackImage);
+      } catch { reply(400, { error: 'Valid scene and building reference images are required.' }); return; }
+      const primaryBytes = endpoint.multiReference ? bytes : (fallbackBytes ?? bytes);
+      const response = await request(endpoint.url, {
         method: 'POST',
         headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: deployment,
           prompt: REALISTIC_PROMPT,
-          input_image: bytes.toString('base64'),
-          aspect_ratio: '16:9',
+          input_image: primaryBytes.toString('base64'),
+          ...(endpoint.multiReference && referenceBytes ? { input_image_2: referenceBytes.toString('base64') } : {}),
           output_format: 'png',
         }),
         signal: controller.signal,
@@ -100,7 +120,7 @@ export function realisticViewMiddleware(options: RealisticViewOptions, request: 
         } else if (providerMessage) {
           reply(502, { error: `Azure rejected the image edit: ${providerMessage}` });
         } else {
-          reply(502, { error: 'Azure could not run this Flux image edit. Confirm the deployment uses FLUX.1-Kontext-pro and has available quota.' });
+          reply(502, { error: 'Azure could not run this Flux image edit. Confirm the configured FLUX deployment has available quota.' });
         }
         return;
       }
@@ -118,7 +138,7 @@ export function realisticViewMiddleware(options: RealisticViewOptions, request: 
       const contentType = imageResponse.headers.get('content-type') ?? '';
       if (!contentType.startsWith('image/')) throw new Error('Invalid generated image');
       const imageBytes = new Uint8Array(await imageResponse.arrayBuffer());
-      if (imageBytes.length > MAX_BODY) throw new Error('Generated image is too large');
+      if (imageBytes.length > MAX_IMAGE) throw new Error('Generated image is too large');
       reply(200, { image: `data:${contentType};base64,${Buffer.from(imageBytes).toString('base64')}` });
     } catch {
       reply(502, { error: controller.signal.aborted ? 'Image generation timed out or was cancelled. You can try again.' : 'Could not reach the image service. Please try again.' });

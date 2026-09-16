@@ -477,6 +477,8 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
     const panorama = map.getStreetView();
     const position = toLiteral(selectedLocation.current);
     const pov = panorama.getPov();
+    const panoramaPosition = panorama.getPosition();
+    const panoramaZoom = panorama.getZoom();
     const boundary = selectionMode === "custom" ? customBoundaryPoints : undefined;
     if (boundary && boundary.length < 3) {
       setMessage("Add at least 3 points to complete the boundary.");
@@ -496,6 +498,16 @@ export function GoogleMapView({ onCreateTwin }: GoogleMapViewProps) {
       lng: geometry?.center.lng ?? position.lng,
       heading: panorama.getVisible() ? pov.heading : 0,
       pitch: panorama.getVisible() ? pov.pitch : 0,
+      ...(panorama.getVisible() && panoramaPosition && panorama.getPano() ? {
+        streetView: {
+          panoId: panorama.getPano(),
+          ...toLiteral(panoramaPosition),
+          heading: pov.heading,
+          pitch: pov.pitch,
+          // Street View's interactive zoom 1 is approximately a 90-degree FOV.
+          fov: Math.max(20, Math.min(120, 180 / 2 ** panoramaZoom)),
+        },
+      } : {}),
       radiusMeters: geometry?.radiusMeters ?? areaSizeMeters / 2,
       ...(boundary ? { boundary } : {}),
       ...(addressWasTyped ? { address: placeName } : {}),
