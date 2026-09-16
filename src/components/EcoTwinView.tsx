@@ -4,7 +4,8 @@ import type { SceneCapture } from "./EcoTwinScene";
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { MapPin } from "lucide-react";
 import { applyIntervention } from "../lib/ecotwin/applyIntervention";
-import { loadNeighborhood, type Neighborhood } from "../lib/ecotwin/geography";
+import { loadNeighborhood } from "../lib/ecotwin/geography";
+import { addGoogleVegetation, type VegetationNeighborhood } from "../lib/ecotwin/googleVegetation";
 import { simulateScenario, simulateScenarioTimeline } from "../lib/ecotwin/simulation";
 import type {
   EcoCell,
@@ -21,14 +22,29 @@ import { MetricsPanel } from "./MetricsPanel";
 import { ViewModeToggle } from "./ViewModeToggle";
 
 export function EcoTwinView({ location }: { location: TwinLocation }) {
-  const [result, setResult] = useState<Neighborhood | null>(null);
+  const [result, setResult] = useState<VegetationNeighborhood | null>(null);
   const [error, setError] = useState("");
+  const [loadingMessage, setLoadingMessage] = useState("Finding real building outlines, roads, and mapped green areas.");
   const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     loadNeighborhood(location)
-      .then((data) => {
-        if (active) setResult(data);
+      .then(async (data) => {
+        if (!active) return;
+        setLoadingMessage("Detecting green zones from Google satellite imagery…");
+        try {
+          const enhanced = await addGoogleVegetation(location, data, controller.signal);
+          if (active) setResult(enhanced);
+        } catch (reason) {
+          if (!controller.signal.aborted && active) {
+            console.warn(reason);
+            setResult({
+              ...data,
+              vegetationDetectionError: reason instanceof Error ? reason.message : "Google vegetation detection is unavailable.",
+            });
+          }
+        }
       })
       .catch((reason: unknown) => {
         if (active)
@@ -40,6 +56,7 @@ export function EcoTwinView({ location }: { location: TwinLocation }) {
       });
     return () => {
       active = false;
+      controller.abort();
     };
   }, [location, attempt]);
 
@@ -53,16 +70,14 @@ export function EcoTwinView({ location }: { location: TwinLocation }) {
             : "Loading your neighborhood"}
         </h2>
         <p>
-          {error ||
-            (location.boundary
-              ? "Finding real building outlines, roads, and mapped green areas inside your custom boundary."
-              : `Finding real building outlines, roads, and mapped green areas within ${location.radiusMeters} metres of your location.`)}
+          {error || loadingMessage}
         </p>
         {error ? (
           <button
             type="button"
             onClick={() => {
               setError("");
+              setLoadingMessage("Finding real building outlines, roads, and mapped green areas.");
               setAttempt((n) => n + 1);
             }}
           >
@@ -72,8 +87,7 @@ export function EcoTwinView({ location }: { location: TwinLocation }) {
           <span className="loading-track" />
         )}
         <small>
-          OpenStreetMap · Geometry only; no Street View images are
-          reconstructed.
+          OpenStreetMap geometry · Google satellite green-zone detection
         </small>
       </div>
     );
@@ -85,7 +99,7 @@ function LoadedTwin({
   neighborhood,
 }: {
   location: TwinLocation;
-  neighborhood: Neighborhood;
+  neighborhood: VegetationNeighborhood;
 }) {
   const captureRef = useRef<SceneCapture>(null);
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -258,6 +272,12 @@ function LoadedTwin({
           <div className="geography-summary">
             <strong>{neighborhood.buildings} buildings</strong>
             <span>{Math.round(unknownAreaFraction * 100)}% unmapped</span>
+            {neighborhood.vegetationDetection && (
+              <span>{Math.round(neighborhood.vegetationDetection.areaM2).toLocaleString()} m² satellite greenery</span>
+            )}
+            {neighborhood.vegetationDetectionError && (
+              <span title={neighborhood.vegetationDetectionError}>Satellite greenery unavailable</span>
+            )}
             {neighborhood.buildings === 0 && (
               <span>No building footprints</span>
             )}

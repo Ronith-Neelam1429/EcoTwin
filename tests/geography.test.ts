@@ -4,6 +4,7 @@ import { buildingHeight, cellAt, clip, contains, neighborhoodQuery, parseMeters,
 import { applyIntervention } from "../src/lib/ecotwin/applyIntervention";
 import { tileTags } from "../src/lib/ecotwin/vectorSource";
 import { calculateMetrics } from "../src/lib/ecotwin/simulation";
+import { applyDetectedVegetation, isVegetationPixel } from "../src/lib/ecotwin/googleVegetation";
 import type { TwinLocation } from "../src/lib/ecotwin/types";
 
 const origin: TwinLocation = { lat: 0, lng: 0, heading: 90, pitch: 10, radiusMeters: 150 };
@@ -111,6 +112,34 @@ test("empty coverage is explicitly unknown, not synthetic terrain", () => {
   assert.equal(n.buildings, 0);
   assert.equal(n.features.length, 0);
   assert.equal(n.unknownCells, 900);
+});
+
+test("satellite classifier recognizes vegetation colors conservatively", () => {
+  assert.equal(isVegetationPixel(45, 92, 48), true);
+  assert.equal(isVegetationPixel(92, 96, 99), false);
+  assert.equal(isVegetationPixel(35, 60, 92), false);
+  assert.equal(isVegetationPixel(245, 255, 245), false);
+});
+
+test("satellite vegetation becomes baseline green cover rather than an intervention", () => {
+  const n = parseNeighborhood({ elements: [] }, origin);
+  const selected = n.baseline.find((cell) => cell.id === "15-15")!;
+  const enhanced = applyDetectedVegetation(n, [selected]);
+  const detected = enhanced.baseline.find((cell) => cell.id === selected.id)!;
+  assert.equal(detected.surfaceType, "grass");
+  assert.equal(detected.baselineSurfaceType, "grass");
+  assert.equal(enhanced.vegetationDetection?.cells, 1);
+  assert.ok(enhanced.features.some((feature) => feature.id === `google-vegetation-${selected.id}`));
+  assert.equal(calculateMetrics(enhanced.baseline).interventions, 0);
+});
+
+test("satellite green detection cannot replace mapped pavement", () => {
+  const n = parseNeighborhood({ elements: [road] }, origin);
+  const paved = n.baseline.find((cell) => cell.surfaceType === "asphalt")!;
+  const enhanced = applyDetectedVegetation(n, [paved]);
+  assert.equal(enhanced.baseline.find((cell) => cell.id === paved.id)?.surfaceType, "asphalt");
+  assert.equal(enhanced.vegetationDetection?.cells, 0);
+  assert.ok(!enhanced.features.some((feature) => feature.id === `google-vegetation-${paved.id}`));
 });
 
 test("a custom border clips the modeled cells and preserves fractional edge area", () => {
