@@ -1,3 +1,4 @@
+import { BuildingLabels, type BuildingOverride } from "./BuildingLabels";
 import { flushSync } from "react-dom";
 import { RealisticView } from "./RealisticView";
 import type { SceneCapture } from "./EcoTwinScene";
@@ -102,6 +103,11 @@ function LoadedTwin({
   neighborhood: VegetationNeighborhood;
 }) {
   const captureRef = useRef<SceneCapture>(null);
+  const [buildingOverrides, setBuildingOverrides] = useState<Record<string, BuildingOverride>>({});
+  const [showBuildingLabels, setShowBuildingLabels] = useState(false);
+  const modeledNeighborhood = useMemo(() => ({ ...neighborhood,
+    features: neighborhood.features.map(feature => ({ ...feature, ...buildingOverrides[feature.id] })),
+  }), [neighborhood, buildingOverrides]);
   const layoutRef = useRef<HTMLDivElement>(null);
   const draggingPanel = useRef<"left" | "right" | null>(null);
   const baseline = neighborhood.baseline;
@@ -229,7 +235,7 @@ function LoadedTwin({
         </div>
         <div className="twin-view-actions">
           <ViewModeToggle value={viewMode} onChange={setViewMode} />
-          <RealisticView location={location} revision={cells.map((cell) => cell.surfaceType).join(',')} capture={async () => {
+          <RealisticView location={location} revision={cells.map((cell) => cell.surfaceType).join(',') + JSON.stringify(buildingOverrides)} capture={async () => {
             flushSync(() => setViewMode("surface"));
             // The Three scene reconciles in its own React root. Let it commit the surface materials.
             await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
@@ -248,6 +254,9 @@ function LoadedTwin({
           onSelectTool={setSelectedTool}
           onReset={resetGrid}
         >
+          <BuildingLabels buildings={modeledNeighborhood.features.filter(feature => feature.surface === 'building')}
+            visible={showBuildingLabels} onVisible={setShowBuildingLabels}
+            onChange={(id, value) => setBuildingOverrides(current => ({ ...current, [id]: value }))} />
           <ScenarioControls inputs={inputs} weather={weather} loading={weatherLoading} error={weatherError} customized={customized}
             onUseDefaults={() => { setInputs({ ...(weather?.inputs ?? DEFAULT_SCENARIO) }); setCustomized(false); }}
             onChange={(next) => { setInputs(next); setCustomized(true); }} />
@@ -266,7 +275,8 @@ function LoadedTwin({
             viewMode={viewMode}
             selectedTool={selectedTool}
             onCellClick={updateCell}
-            neighborhood={neighborhood}
+            neighborhood={modeledNeighborhood}
+            showBuildingLabels={showBuildingLabels}
             location={location}
           />
           <div className="geography-summary">

@@ -9,6 +9,9 @@ import { CELL_METERS, cellAt, cellPolygon, contains, type Neighborhood, type Are
 import type { VegetationNeighborhood } from "../lib/ecotwin/googleVegetation";
 import type { EcoCell, InterventionTool, TwinLocation, ViewMode } from "../lib/ecotwin/types";
 
+import { BUILDING_CATEGORIES, BUILDING_STYLES } from "../lib/ecotwin/buildingModels";
+import { captureScene, type CapturedScene } from "../lib/ecotwin/sceneCapture";
+
 const GROUND_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 // Keep the flat render layers physically separate. The neighborhood slab ends at
 // y=0; drawing the cell grid there too makes the GPU alternate between their
@@ -116,9 +119,9 @@ function shapesFrom(polygons: MultiPolygon) {
   });
 }
 
-function Footprint({ polygons, height = 0, y = 0.03, color, roughness = 0.9, unlit = false, onClick }: {
+function Footprint({ polygons, height = 0, y = 0.03, color, roughness = 0.9, unlit = false, texture, onClick }: {
   polygons: MultiPolygon; height?: number; y?: number; color: string; roughness?: number;
-  unlit?: boolean; onClick?: (event: ThreeEvent<MouseEvent>) => void;
+  texture?: THREE.Texture; unlit?: boolean; onClick?: (event: ThreeEvent<MouseEvent>) => void;
 }) {
   const shapes = useMemo(() => shapesFrom(polygons), [polygons]);
   return (
@@ -126,7 +129,7 @@ function Footprint({ polygons, height = 0, y = 0.03, color, roughness = 0.9, unl
       {height > 0
         ? <extrudeGeometry args={[shapes, { depth: height, bevelEnabled: false }]} />
         : <shapeGeometry args={[shapes]} />}
-      {unlit ? <meshBasicMaterial color={color} toneMapped={false} side={THREE.DoubleSide} /> : <meshStandardMaterial color={color} roughness={roughness} side={THREE.DoubleSide} />}
+      {unlit ? <meshBasicMaterial color={color} toneMapped={false} side={THREE.DoubleSide} /> : <meshStandardMaterial map={texture} color={color} roughness={roughness} side={THREE.DoubleSide} />}
     </mesh>
   );
 }
@@ -262,10 +265,64 @@ function ParkingModels({ features }: { features: AreaFeature[] }) {
   </>;
 }
 
-function Building({ feature, cells, baselineById, gridSize, mode, tool, onSelect, rainfallMm }: {
-  rainfallMm: number; feature: AreaFeature; cells: EcoCell[]; baselineById: Map<string, EcoCell>; gridSize: number; mode: ViewMode; tool: InterventionTool; onSelect: (id: string) => void;
+// Repeatable model modules follow actual footprint edges, including irregular malls.
+function Storefronts({ feature, onClick }: { feature: AreaFeature; onClick: (event: ThreeEvent<MouseEvent>) => void }) {
+  const panels = useMemo(() => feature.polygons.flatMap(([ring]) => ring.slice(0, -1).flatMap(([x, z], i) => {
+    const [nx, nz] = ring[i + 1];
+    const length = Math.hypot(nx - x, nz - z);
+    if (length < 0.5) return [];
+    const count = Math.min(60, Math.floor(length / 0.45));
+    return Array.from({ length: count }, (_, j) => ({
+      x: x + (nx - x) * (j + 0.5) / count, z: z + (nz - z) * (j + 0.5) / count,
+      width: length / count * 0.78, angle: -Math.atan2(nz - z, nx - x),
+    }));
+  })), [feature]);
+  const mesh = useRef<THREE.InstancedMesh>(null);
+  useLayoutEffect(() => {
+    if (!mesh.current) return;
+    const transform = new THREE.Object3D();
+    panels.forEach((panel, index) => {
+      transform.position.set(panel.x, Math.min(0.19, feature.height / 2), panel.z);
+      transform.rotation.set(0, panel.angle, 0);
+      transform.scale.set(panel.width, Math.min(0.24, feature.height * 0.65), 0.012);
+      transform.updateMatrix();
+      mesh.current!.setMatrixAt(index, transform.matrix);
+    });
+    mesh.current.instanceMatrix.needsUpdate = true;
+    mesh.current.computeBoundingSphere();
+  }, [panels, feature.height]);
+  return <instancedMesh ref={mesh} args={[undefined, undefined, panels.length]} onClick={onClick}>
+    <boxGeometry args={[1, 1, 1]} />
+    <meshStandardMaterial color="#52747b" roughness={0.3} metalness={0.25} />
+  </instancedMesh>;
+}
+
+function PlantedPatch({ polygons, y, onClick }: { polygons: MultiPolygon; y: number; onClick: (event: ThreeEvent<MouseEvent>) => void }) {
+  const texture = useMemo(() => {
+    const data = new Uint8Array(64 * 64 * 4);
+    for (let i = 0; i < 64 * 64; i++) {
+      const shade = 0.65 + seeded(i, 42) * 0.65;
+      data.set([Math.min(255, 105 * shade), Math.min(255, 153 * shade), 48 * shade, 255], i * 4);
+    }
+    const result = new THREE.DataTexture(data, 64, 64);
+    result.colorSpace = THREE.SRGBColorSpace;
+    result.wrapS = result.wrapT = THREE.RepeatWrapping;
+    result.repeat.set(3, 3);
+    result.needsUpdate = true;
+    return result;
+  }, []);
+  useEffect(() => () => texture.dispose(), [texture]);
+  return <Footprint polygons={polygons} height={0.018} y={y} color="#ffffff" texture={texture} onClick={onClick} />;
+}
+
+function Building({ feature, showLabel, labelIndex, cells, baselineById, gridSize, mode, tool, onSelect, rainfallMm }: {
+  showLabel: boolean; labelIndex: number; rainfallMm: number; feature: AreaFeature; cells: EcoCell[]; baselineById: Map<string, EcoCell>; gridSize: number; mode: ViewMode; tool: InterventionTool; onSelect: (id: string) => void;
 }) {
   const displayHeight = feature.height;
+  const category = feature.identity?.category ?? 'unknown';
+  const style = BUILDING_STYLES[category];
+  const label = feature.name || BUILDING_CATEGORIES[category];
+  const labelPoint = feature.polygons[0]?.[0]?.[0] ?? [0, 0];
   const roofs = useMemo(() => cells.filter((cell) => cell.buildingId === feature.id && (mode !== "surface" || cell.surfaceType === "green_roof"))
     .map((cell) => ({ cell, polygons: polygonClipping.intersection(feature.polygons, cellPolygon(cell.row, cell.col, gridSize)) })), [cells, feature, gridSize, mode]);
   function click(event: ThreeEvent<MouseEvent>) {
@@ -287,11 +344,20 @@ function Building({ feature, cells, baselineById, gridSize, mode, tool, onSelect
     if (cell) onSelect(cell.id);
   }
   return (
-    <group>
-      <Footprint polygons={feature.polygons} height={displayHeight} color={SURFACE_COLORS.building} roughness={0.82} onClick={click} />
-      {mode === "surface" && <Footprint polygons={feature.polygons} y={displayHeight + 0.018} color="#d8bea8" roughness={0.9} onClick={click} />}
+    <group userData={{ buildingLabel: label, buildingCategory: BUILDING_CATEGORIES[category] }}>
+      {showLabel && <Html position={[labelPoint[0], displayHeight + 0.3, labelPoint[1]]} center style={{ pointerEvents: 'none' }}>
+        <span className="building-scene-label">{labelIndex}. {label}<small>{feature.name ? BUILDING_CATEGORIES[category] : ''}</small></span>
+      </Html>}
+      <Footprint polygons={feature.polygons} height={displayHeight} color={style.wall} roughness={0.82} onClick={click} />
+      {mode === "surface" && <>
+        <Footprint polygons={feature.polygons} y={displayHeight + 0.034} color={style.roof} roughness={0.9} onClick={click} />
+        {style.storefront && <Storefronts feature={feature} onClick={click} />}
+      </>}
       {roofs.filter((r) => r.polygons.length).map(({ cell, polygons }) => (
-        <Footprint key={cell.id} polygons={polygons} y={displayHeight + 0.035} unlit={mode !== "surface"} color={colorFor(cell, baselineById.get(cell.id), mode, rainfallMm)} onClick={click} />
+        <group key={cell.id} userData={cell.surfaceType !== cell.baselineSurfaceType ? { intervention: cell.surfaceType } : {}}>
+          {mode === "surface" ? <PlantedPatch polygons={polygons} y={displayHeight + 0.042} onClick={click} />
+            : <Footprint polygons={polygons} y={displayHeight + 0.04} unlit color={colorFor(cell, baselineById.get(cell.id), mode, rainfallMm)} onClick={click} />}
+        </group>
       ))}
     </group>
   );
@@ -506,37 +572,18 @@ function RunoffRipples({ cells, gridSize, active, rainfallMm }: { cells: EcoCell
   </instancedMesh>;
 }
 
-export type SceneCapture = { capture: () => string };
+export type SceneCapture = { capture: () => CapturedScene };
 function CaptureBridge({ captureRef, viewMode }: { captureRef?: Ref<SceneCapture>; viewMode: ViewMode }) {
   const { gl, scene, camera } = useThree();
   useImperativeHandle(captureRef, () => ({ capture() {
     if (viewMode !== "surface") throw new Error("The surface view is still updating. Please try again.");
-    const hidden: THREE.Object3D[] = [], shown: THREE.Object3D[] = [];
-    scene.traverse((object) => {
-      if (object.userData.captureHidden && object.visible) { hidden.push(object); object.visible = false; }
-      if (object.userData.captureOnly && !object.visible) { shown.push(object); object.visible = true; }
-    });
-    try {
-      gl.render(scene, camera);
-      const output = document.createElement('canvas');
-      const scale = Math.min(1, 1536 / Math.max(gl.domElement.width, gl.domElement.height));
-      output.width = Math.max(1, Math.round(gl.domElement.width * scale));
-      output.height = Math.max(1, Math.round(gl.domElement.height * scale));
-      const context = output.getContext('2d');
-      if (!context) throw new Error('Could not capture the scene. Please retry.');
-      context.drawImage(gl.domElement, 0, 0, output.width, output.height);
-      return output.toDataURL('image/png');
-    } finally {
-      hidden.forEach((object) => { object.visible = true; });
-      shown.forEach((object) => { object.visible = false; });
-      gl.render(scene, camera);
-    }
+    return captureScene(gl, scene, camera);
   } }), [gl, scene, camera, viewMode]);
   return null;
 }
 
-export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onCellClick, neighborhood, location, rainfallMm, captureRef }: {
-  captureRef?: Ref<SceneCapture>; rainfallMm: number; cells: EcoCell[]; baselineCells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: VegetationNeighborhood; location: TwinLocation;
+export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onCellClick, neighborhood, location, rainfallMm, captureRef, showBuildingLabels = false }: {
+  showBuildingLabels?: boolean; captureRef?: Ref<SceneCapture>; rainfallMm: number; cells: EcoCell[]; baselineCells: EcoCell[]; viewMode: ViewMode; selectedTool: InterventionTool; onCellClick: (id: string) => void; neighborhood: VegetationNeighborhood; location: TwinLocation;
 }) {
   const [selectedCell, setSelectedCell] = useState<string | null>(null);
   const [pausedMode, setPausedMode] = useState<ViewMode | null>(null);
@@ -591,7 +638,7 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
           const changed = cell.surfaceType !== cell.baselineSurfaceType;
           const showSurface = viewMode !== "surface" || (changed && !cell.buildingId);
           return (
-            <group key={cell.id}>
+            <group key={cell.id} userData={changed && !cell.buildingId ? { intervention: cell.surfaceType } : {}}>
               <CellSurface
                 cell={cell}
                 boundary={neighborhood.boundary}
@@ -606,8 +653,8 @@ export function EcoTwinScene({ cells, baselineCells, viewMode, selectedTool, onC
             </group>
           );
         })}
-        {neighborhood.features.filter((f) => f.surface === "building").map((feature) => (
-          <Building key={feature.id} feature={feature} cells={cells} baselineById={baselineById} gridSize={gridSize} mode={viewMode} tool={selectedTool} onSelect={select} rainfallMm={rainfallMm} />
+        {neighborhood.features.filter((f) => f.surface === "building").map((feature, index) => (
+          <Building key={feature.id} showLabel={showBuildingLabels} labelIndex={index + 1} feature={feature} cells={cells} baselineById={baselineById} gridSize={gridSize} mode={viewMode} tool={selectedTool} onSelect={select} rainfallMm={rainfallMm} />
         ))}
         <ExistingTrees trees={neighborhood.trees} cells={cells} baselineById={baselineById} gridSize={gridSize}
           mode={viewMode} rainfallMm={rainfallMm} onSelect={clickCell} />

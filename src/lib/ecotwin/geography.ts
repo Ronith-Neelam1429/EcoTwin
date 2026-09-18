@@ -1,3 +1,4 @@
+import { classifyBuilding, type BuildingIdentity } from "./buildingModels";
 import osmtogeojson from "osmtogeojson";
 import type { FeatureCollection } from "geojson";
 import polygonClipping, { type Polygon, type MultiPolygon, type Pair } from "polygon-clipping";
@@ -14,6 +15,7 @@ export type AreaFeature = {
   surface: "building" | "asphalt" | "grass" | "tree";
   kind: "building" | "road" | "cul_de_sac" | "parking_lot" | "parking_space" | "landscape";
   name?: string;
+  identity?: BuildingIdentity;
   height: number;
   heightSource: "tag" | "levels" | "assumed";
 };
@@ -364,8 +366,23 @@ export function parseGeoNeighborhood(geojson: FeatureCollection, origin: TwinLoc
         : tags.amenity === "parking_space" ? "parking_space"
           : tags.amenity === "parking" ? "parking_lot"
             : tags.highway ? "road" : "landscape";
-      features.push({ id, polygons, surface, kind, name: tags.name, ...buildingHeight(tags) });
+      features.push({ id, polygons, surface, kind, name: tags.name ?? tags.brand, ...(surface === "building" ? { identity: classifyBuilding(tags, polygons) } : {}), ...buildingHeight(tags) });
     }
+  }
+
+  // Associate point businesses with their containing footprint. Multiple tenants
+  // share one complex; a POI is not evidence of a separate building outline.
+  const businesses = geojson.features.flatMap((feature) => {
+    const tags = (feature.properties ?? {}) as Record<string, string>;
+    if (feature.geometry?.type !== "Point" || !(tags.shop || tags.amenity === "restaurant" || tags.amenity === "cafe")) return [];
+    return [{ tags, point: project(feature.geometry.coordinates[0], feature.geometry.coordinates[1], origin) }];
+  });
+  for (const building of features.filter((feature) => feature.surface === "building")) {
+    const occupants = businesses.filter(({ point }) => contains(point, building.polygons));
+    if (!occupants.length) continue;
+    const tenants = [...new Set(occupants.map(({ tags }) => tags.name ?? tags.brand).filter(Boolean))];
+    building.identity = classifyBuilding({ building: "retail", ...occupants[0].tags }, building.polygons, tenants);
+    if (!building.name && tenants.length === 1) building.name = tenants[0];
   }
 
   // Generalized tile data often drops tagged turning-circle nodes. Add a
@@ -445,7 +462,7 @@ export function neighborhoodQuery(location: TwinLocation) {
   const latDelta = queryRadius / EARTH_RADIUS / radians;
   const lngDelta = latDelta / Math.cos(location.lat * radians);
   const bounds = [location.lat - latDelta, location.lng - lngDelta, location.lat + latDelta, location.lng + lngDelta].join(",");
-  return `[out:json][timeout:25];(nwr[building][building!=no](${bounds});way[highway](${bounds});nwr[highway~"^(turning_circle|turning_loop)$"](${bounds});nwr[landuse~"^(grass|meadow|forest|orchard|cemetery|recreation_ground|village_green)$"](${bounds});nwr[natural~"^(wood|grassland|scrub|heath|tree)$"](${bounds});nwr[leisure~"^(park|garden|pitch|golf_course)$"](${bounds});nwr[amenity~"^(parking|parking_space)$"](${bounds}););out geom;`;
+  return `[out:json][timeout:25];(nwr[building][building!=no](${bounds});node[shop](${bounds});node[amenity~"^(restaurant|cafe)$"](${bounds});way[highway](${bounds});nwr[highway~"^(turning_circle|turning_loop)$"](${bounds});nwr[landuse~"^(grass|meadow|forest|orchard|cemetery|recreation_ground|village_green)$"](${bounds});nwr[natural~"^(wood|grassland|scrub|heath|tree)$"](${bounds});nwr[leisure~"^(park|garden|pitch|golf_course)$"](${bounds});nwr[amenity~"^(parking|parking_space)$"](${bounds}););out geom;`;
 }
 
 // Cache only in this page's memory: no saved address or location history.

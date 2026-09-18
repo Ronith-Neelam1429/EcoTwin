@@ -30,9 +30,12 @@ export function tileTags(layer: string, properties: Record<string, unknown>): Re
   if (layer === "poi" && (kind === "tree" || subclass === "tree" || properties.natural === "tree")) {
     return { natural: "tree" };
   }
+  if (layer === "poi" && properties.name && (kind === "shop" || ["supermarket", "hairdresser", "mall", "bakery", "convenience", "beauty"].includes(subclass || kind))) {
+    return { name: String(properties.name), shop: subclass || kind };
+  }
   if (layer === "building") {
     if (properties.hide_3d === true) return null;
-    return { building: "yes", render_height: String(properties.render_height ?? 6) };
+    return { building: String(properties.building ?? "yes"), name: String(properties.name ?? ""), render_height: String(properties.render_height ?? 6) };
   }
   if (layer === "transportation") {
     if (["rail", "aerialway", "ferry"].includes(kind) || properties.brunnel === "tunnel") return null;

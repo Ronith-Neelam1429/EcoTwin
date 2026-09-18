@@ -1,0 +1,46 @@
+<!doctype html><html lang="en"><head><meta charset="UTF-8"><title>Scene capture regression</title></head><body>
+<h1>Scene capture regression</h1><p id="result">Running GPU checks…</p><div id="images"></div>
+<script type="module">
+import * as THREE from 'three';
+import { captureScene, composeRealisticView } from '/src/lib/ecotwin/sceneCapture.ts';
+const result = document.querySelector('#result');
+try {
+  const gl = new THREE.WebGLRenderer({ alpha: true }); gl.setSize(256, 256);
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('blue');
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 20); camera.position.z = 5;
+  const patch = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.6), new THREE.MeshBasicMaterial({ color: '#00ff00' }));
+  patch.userData.intervention = 'green_roof'; scene.add(patch);
+  const occluder = new THREE.Mesh(new THREE.PlaneGeometry(1, 2), new THREE.MeshBasicMaterial({ color: '#cc0000' }));
+  occluder.position.set(0.5, 0, 1); scene.add(occluder);
+  const original = occluder.material;
+  const capture = captureScene(gl, scene, camera);
+  const canvas = document.createElement('canvas'); canvas.width = canvas.height = 256;
+  const context = canvas.getContext('2d');
+  async function draw(url) { const image = await createImageBitmap(await (await fetch(url)).blob()); context.clearRect(0, 0, 256, 256); context.drawImage(image, 0, 0); image.close(); }
+  const pixel = (x, y) => [...context.getImageData(x, y, 1, 1).data];
+  const check = (value, message) => { if (!value) throw new Error(message); };
+  await draw(capture.interventions);
+  check(pixel(64,128)[1] === 255 && pixel(64,128)[3] === 255, 'Visible roof disappeared');
+  check(pixel(192,128)[3] === 0, 'Roof painted through occluding building');
+  check(pixel(2,2)[3] === 0, 'Background leaked into intervention layer');
+  check(occluder.material === original && scene.background !== null, 'Scene state was not restored');
+  check(capture.manifest.interventions[0].kind === 'green_roof', 'Intervention missing from prompt');
+  context.fillStyle = '#fff'; context.fillRect(0,0,256,256);
+  const composed = await composeRealisticView(canvas.toDataURL(), capture);
+  await draw(composed);
+  check(pixel(64,128)[1] === 255 && pixel(64,128)[0] === 0, 'Final image lost roof');
+  check(pixel(192,128)[0] === 255, 'Final image ignores occlusion');
+  scene.remove(patch);
+  const erased = captureScene(gl, scene, camera);
+  await draw(erased.interventions);
+  check(pixel(64,128)[3] === 0, 'Erased intervention remained in next capture');
+  for (const [label, url] of [['Scene', capture.image], ['Preserved additions', capture.interventions], ['Final composition', composed]]) {
+    const figure = document.createElement('figure'); figure.style.display = 'inline-block';
+    const title = document.createElement('figcaption'); title.textContent = label;
+    const image = document.createElement('img'); image.src = url; image.alt = label;
+    figure.append(title, image); document.querySelector('#images').append(figure);
+  }
+  gl.dispose();
+  result.textContent = 'PASS: visible roof preserved; depth occlusion correct; transparent background; scene restored; manifest included; final composition correct; erased additions removed.';
+} catch (error) { result.textContent = `FAIL: ${error.message}`; }
+</script></body></html>

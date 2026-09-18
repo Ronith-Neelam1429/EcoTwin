@@ -84,3 +84,27 @@ test('provider errors do not expose credentials or provider payloads', async () 
     assert(!body.includes('private provider detail'));
   });
 });
+
+test('scene manifest prioritizes placed roof patches and building categories in both providers', async () => {
+  for (const provider of ['flux-kontext-pro', 'flux-2-pro']) await endpoint('key', async (_url, options) => {
+    const body = JSON.parse(options?.body as string);
+    assert.match(body.prompt, /green_roof/);
+    assert.match(body.prompt, /Large store/);
+    assert.match(body.prompt, /0.2,0.3,0.6,0.5/);
+    assert.equal(body.input_image, png.split(',')[1]);
+    return Response.json({ data: [{ b64_json: png.split(',')[1] }] });
+  }, async url => {
+    assert.equal((await send(url, { image: png, manifest: {
+      buildings: [{ label: 'QFC', category: 'Large store', bounds: [0, 0, 1, 1] }],
+      interventions: [{ kind: 'green_roof', bounds: [0.2, 0.3, 0.6, 0.5] }],
+    } })).status, 200);
+  }, provider);
+});
+
+test('malformed intervention manifests are rejected before contacting Azure', async () => {
+  await endpoint('key', async () => { throw new Error('Must not call provider'); }, async url => {
+    for (const intervention of [null, { kind: 'unknown', bounds: [0, 0, 1, 1] }, { kind: 'green_roof', bounds: [1, 0, 0, 1] }]) {
+      assert.equal((await send(url, { image: png, manifest: { buildings: [], interventions: [intervention] } })).status, 400);
+    }
+  });
+});

@@ -2561,3 +2561,13 @@ a:focus-visible {
     grid-template-columns: 60px minmax(0, 1fr);
   }
 }
+
+.building-labels { padding: 14px 0; border-top: 1px solid #39434b; margin-top: 14px; }
+.building-labels summary { cursor: pointer; font-weight: 700; }
+.building-labels p, .building-labels small { font-size: 11px; line-height: 1.5; color: #a6b3bf; }
+.building-label-toggle { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.building-label-editor { display: grid; gap: 6px; margin: 14px 0; }
+.building-label-editor label { font-size: 11px; color: #a6b3bf; }
+.building-label-editor input, .building-label-editor select { width: 100%; min-width: 0; padding: 7px; color: #e1e9ed; background: #20282e; border: 1px solid #4a5863; border-radius: 4px; }
+.building-scene-label { display: block; max-width: 160px; padding: 4px 7px; border: 1px solid #879f94; border-radius: 4px; background: #182c29ed; color: #fff; font-size: 10px; white-space: nowrap; }
+.building-scene-label small { display: block; color: #c5d7cc; font-size: 9px; }
